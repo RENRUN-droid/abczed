@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <meta name="theme-color" content="#0D47A1" />
+  <title>ABCZed</title>
+  <style>
+    /* Fond crème appliqué à la racine, une seule fois — pas écran par écran (contrat visuel §4) */
+    html, body, #root {
+      min-height: 100%;
+      background: #FBF6EC;
+    }
+    body {
+      margin: 0;
+      font-family: 'Nunito Sans Variable', 'Nunito Sans', sans-serif;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* Tailwind n'est pas installé dans ce projet — ces deux classes sont utilisées partout
+       dans le code (App.jsx, Login, feuilles modales...) en supposant qu'elles existent,
+       mais ne produisaient jusqu'ici aucune règle CSS réelle : le contenu s'étirait sur
+       toute la largeur en desktop au lieu de rester centré sur une colonne mobile. 448px =
+       valeur par défaut de max-w-md en Tailwind, reprise pour rester cohérent avec l'intention
+       d'origine du code, pas une nouvelle valeur inventée.
+       Correction ciblée : contrôle, pas une refonte desktop.
+
+       Delta §23/§24 (3e passe) : 448px fixe à TOUTES les largeurs était justement le défaut
+       signalé — "mobile-first ne signifie pas colonne mobile figée sur desktop". La colonne
+       s'élargit donc progressivement à partir de la tablette, sans jamais devenir une mise en
+       page multi-colonnes générique (qui casserait des pages déjà validées) : seule
+       EventDetail.jsx utilise cet espace pour une vraie disposition à deux zones à partir de
+       1024px (voir .event-detail-grid ci-dessous), le reste profite simplement d'une colonne
+       plus confortable à lire. Points de rupture alignés sur ceux recommandés par le brief
+       pour la recette (360/390-412 restent inchangés sous 768, puis 768/1024/1440). */
+    .max-w-md { max-width: 448px; }
+    @media (min-width: 768px) { .max-w-md { max-width: 640px; } }
+    @media (min-width: 1024px) { .max-w-md { max-width: 900px; } }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+
+    /* Fiche événement (EventDetail.jsx) : disposition en deux zones sur tablette/desktop
+       (delta §23 — "informations principales d'un côté, participation/accompagnement/actions
+       de l'autre"), une seule colonne verticale en dessous de 1024px (mobile ET tablette
+       portrait, pour ne pas écraser un contenu encore étroit). */
+    .event-detail-grid { display: block; }
+    @media (min-width: 1024px) {
+      .event-detail-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 28px; align-items: start; }
+      /* Delta pt 43 : le bloc date/lieu est désormais toujours en pleine largeur au-dessus de
+         cette grille (voir EventDetail.jsx) — cette grille ne porte plus QUE
+         description/pièces jointes (gauche) et participation/actions (droite). Quand la
+         gauche n'a rien à montrer, EventDetail.jsx ne rend pas cette colonne du tout et ajoute
+         cette classe : une seule colonne pleine largeur pour la participation, jamais une
+         colonne vide à côté d'une colonne pleine. */
+      .event-detail-grid.single { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
