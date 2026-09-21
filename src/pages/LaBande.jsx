@@ -1,20 +1,28 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Search, X, ChevronRight, UserPlus, Users } from 'lucide-react';
 import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
-import { MEMBERS, childrenOf } from '../data';
+import { childrenOf } from '../data';
 import { anyFieldMatches } from '../searchUtils';
 import { useScrollRestore } from '../useScrollRestore';
 import PageTitle from '../components/PageTitle';
+import InviteParentSheet from '../components/InviteParentSheet';
 
-export default function LaBande({ onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed }) {
+// V7.18 : `members` reçu en prop (annuaire réel, App.jsx/src/membersApi.js) — remplace l'import
+// direct de MEMBERS (donnée de démonstration, src/data.js). `isAdmin`/`communityId` :
+// nécessaires au bouton "Inviter un parent", réservé aux administrateurs (vérifié à nouveau
+// côté serveur par create_invitation(), sql/09_invitations.sql — l'interface ne propose jamais
+// une action vouée à l'échec côté serveur, même principe déjà appliqué ailleurs dans ce projet,
+// ex. "Lier à un événement" dans Messages.jsx).
+export default function LaBande({ members, membersLoading, membersError, onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed, isAdmin, communityId }) {
   const searchInputRef = useRef(null);
+  const [showInvite, setShowInvite] = useState(false);
 
   // Delta §2.2/§26 : la recherche était déjà restaurée (état levé dans App.jsx) — il manquait
   // le scroll et le focus sur la carte parent d'origine.
   useScrollRestore(restoreState, onRestoreConsumed);
 
   const filtered = useMemo(() => {
-    const list = [...MEMBERS].sort((a, b) => a.firstName.localeCompare(b.firstName, 'fr'));
+    const list = [...members].sort((a, b) => a.firstName.localeCompare(b.firstName, 'fr'));
     if (!query.trim()) return list;
     // Brief §3/§29 : même normalisation (accents/casse/apostrophes) que le reste de
     // l'application — recherche réelle sur parent ET enfant/groupe, pas un simple includes().
@@ -44,10 +52,23 @@ export default function LaBande({ onOpenMember, query, onQueryChange, restoreSta
         )}
       </div>
 
-      {MEMBERS.length === 0 && (
+      {/* Mêmes états dédiés que Messages.jsx (messagesLoading/messagesError) : une erreur réelle
+          reste affichée telle quelle (jamais de repli silencieux), le chargement initial
+          n'affiche aucun état vide trompeur tant qu'il est en cours. */}
+      {membersError && (
+        <div style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: '#8A2E1F' }}>
+          {membersError}
+        </div>
+      )}
+
+      {membersLoading ? (
+        <p style={{ textAlign: 'center', padding: 40, opacity: 0.5, fontSize: 13 }}>Chargement de La Bande…</p>
+      ) : (
+      <>
+      {members.length === 0 && (
         <EmptyState icon={Users} title="Pas encore de membres" text="Les membres invités dans la communauté apparaîtront ici." />
       )}
-      {MEMBERS.length > 0 && filtered.length === 0 && (
+      {members.length > 0 && filtered.length === 0 && (
         <EmptyState icon={Search} title="Aucun membre trouvé" text="Aucun membre ne correspond à votre recherche." />
       )}
 
@@ -97,18 +118,25 @@ export default function LaBande({ onOpenMember, query, onQueryChange, restoreSta
           );
         })}
       </div>
+      </>
+      )}
 
-      <button
-        disabled
-        title="Bientôt disponible"
-        style={{
-          width: '100%', marginTop: 18, padding: '13px 0', borderRadius: 14, border: `1px dashed ${CARD_BORDER}`,
-          background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          fontSize: 13.5, fontWeight: 600, color: MUTED, opacity: 0.7, cursor: 'not-allowed', minHeight: 48,
-        }}
-      >
-        <UserPlus size={16} /> Inviter un parent — bientôt disponible
-      </button>
+      {isAdmin && (
+        <button
+          onClick={() => setShowInvite(true)}
+          style={{
+            width: '100%', marginTop: 18, padding: '13px 0', borderRadius: 14, border: `1px dashed ${SECTION_THEMES.labande.color}`,
+            background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontSize: 13.5, fontWeight: 700, color: SECTION_THEMES.labande.color, cursor: 'pointer', minHeight: 48,
+          }}
+        >
+          <UserPlus size={16} /> Inviter un parent
+        </button>
+      )}
+
+      {showInvite && (
+        <InviteParentSheet communityId={communityId} onClose={() => setShowInvite(false)} />
+      )}
     </div>
   );
 }
