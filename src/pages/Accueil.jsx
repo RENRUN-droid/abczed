@@ -3,7 +3,7 @@ import { CircleAlert, ChevronRight, Image, FileText, Link2, Info, CalendarDays, 
 import { BLUE, RED, INK, MUTED, CARD_BORDER, CATEGORIES, SECTION_THEMES, categoryOf, FONT_DISPLAY } from '../theme';
 import { anyFieldMatches } from '../searchUtils';
 import { nextOccurrence, isUpcomingEvent } from '../agendaSearch';
-import { MEMBERS, childrenOf } from '../data';
+import { childrenOf } from '../data';
 import { useScrollRestore } from '../useScrollRestore';
 // V7.7 (P2) : dernier message de l'Accueil désormais trié sur le vrai `created_at` (via cette
 // même fonction pure que Messages.jsx utilise déjà), jamais sur l'ordre d'arrivée réseau — un
@@ -36,7 +36,7 @@ function fmtShortDate(dateStr) {
 function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 export default function Accueil({
-  events, thread, shares, onOpenEvent, onOpenMessage, onOpenShare, onOpenMember,
+  events, thread, shares, members, onOpenEvent, onOpenMessage, onOpenShare, onOpenMember,
   onViewAllMessages, onViewAllPartages, onCreateEvent, onWriteMessage,
   query, onQueryChange,
   restoreState, onRestoreConsumed,
@@ -109,11 +109,11 @@ export default function Accueil({
   // enfants + groupe — cohérent avec la recherche propre de La Bande (LaBande.jsx).
   const memberResults = useMemo(() => {
     if (!searching) return [];
-    return MEMBERS.filter((m) => {
+    return members.filter((m) => {
       const kids = childrenOf(m);
       return anyFieldMatches([m.firstName, m.lastName, ...kids.map((c) => c.firstName), ...kids.map((c) => c.groupLabel)], q);
     });
-  }, [searching, q]);
+  }, [searching, q, members]);
   const noResults = searching && eventResults.length === 0 && messageResults.length === 0 && shareResults.length === 0 && memberResults.length === 0;
 
   function clearQuery() {
