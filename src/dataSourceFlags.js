@@ -22,6 +22,17 @@ export const AGENDA_FROM_SUPABASE = true;
 // envoi, liaison à un événement réel, réactions, Realtime), via le nouveau module dédié
 // src/messagesApi.js (jamais l'ancien api.js, toujours incompatible avec le schéma sécurisé —
 // voir le commentaire en tête de ce fichier). BUSINESS_DATA_FROM_SUPABASE reste figé à false et
-// continue de gouverner UNIQUEMENT Partages et La Bande, qui restent sur des données locales
-// dans ce lot — brief V7.7 explicite : "Ce lot ne doit donc connecter que Messages."
+// continue de gouverner UNIQUEMENT Partages, qui reste sur des données locales dans ce lot.
 export const MESSAGES_FROM_SUPABASE = true;
+
+// V7.18 : quatrième drapeau, distinct des trois précédents — lui seul pilote La Bande (annuaire
+// des membres réels de la communauté, via src/membersApi.js/src/memberDirectory.js), et donc
+// aussi le résultat "La Bande" de la recherche Accueil et la fiche membre (MemberDetail.jsx),
+// qui partagent la même liste. BUSINESS_DATA_FROM_SUPABASE reste figé à false et continue de
+// gouverner UNIQUEMENT Partages — La Bande n'a jamais dépendu de ce drapeau historique, elle a
+// désormais le sien, sur le même principe que Messages/Agenda avant elle. Ce que ce lot NE
+// couvre PAS : les coordonnées de contact (téléphone/e-mail/partage par canal, MemberDetail.jsx)
+// et l'édition du profil "Vous" (MyProfileSheet.jsx) restent locales à la session — `members`
+// n'a aucune colonne pour ça aujourd'hui ; les enfants/groupes réels (`children`/
+// `member_children`, sql/02_rls.sql) sont en revanche déjà lus tels quels, dès qu'ils existent.
+export const MEMBERS_FROM_SUPABASE = true;
