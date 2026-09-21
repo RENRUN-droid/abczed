@@ -90,13 +90,39 @@ export function AuthProvider({ children }) {
     return true;
   }
 
+  // V7.18 — nécessaire au parcours d'invitation (InviteAccept.jsx) : jusqu'ici AuthProvider
+  // n'exposait que signIn (aucun écran d'inscription n'existait). Ne définit AUCUNE politique
+  // de confirmation d'e-mail elle-même — le projet Supabase peut avoir "Confirm email" activé
+  // ou non ; c'est `data.session` (présente ou non dans la réponse) qui le révèle après coup,
+  // jamais deviné à l'avance ici. L'appelant (InviteAccept.jsx) décide quoi afficher selon ce
+  // que cette fonction renvoie, pas cette fonction elle-même.
+  async function signUp(email, password) {
+    if (!isSupabaseConfigured) return { ok: false, error: 'not-configured' };
+    const { data, error: err } = await supabase.auth.signUp({ email, password });
+    if (err) return { ok: false, error: err.message };
+    // `data.session` non nul = confirmation d'e-mail désactivée sur ce projet : le compte est
+    // déjà authentifié, onAuthStateChange (ci-dessus) va lever loadMemberships tout seul.
+    return { ok: true, hasSession: Boolean(data.session) };
+  }
+
   async function signOut() {
     if (!isSupabaseConfigured) return;
     await supabase.auth.signOut();
   }
 
+  // V7.18 — après accept_invitation() (nouvelle ligne `members` créée côté serveur),
+  // AuthProvider ne le sait pas tout seul : `memberships`/`activeCommunity`/`status` ne se
+  // recalculent que sur un événement onAuthStateChange, jamais sur une simple mutation en base.
+  // Réutilise loadMemberships tel quel (même garde anti-réponse-obsolète) plutôt qu'une
+  // nouvelle logique — InviteAccept.jsx l'appelle explicitement juste après une acceptation
+  // réussie, pour que Root.jsx puisse ensuite basculer naturellement vers l'app une fois
+  // `status` passé à 'authorized'.
+  function refreshMemberships() {
+    if (session) loadMemberships(session);
+  }
+
   return (
-    <AuthContext.Provider value={{ status, session, memberships, activeCommunity, error, signIn, signOut }}>
+    <AuthContext.Provider value={{ status, session, memberships, activeCommunity, error, signIn, signUp, signOut, refreshMemberships }}>
       {children}
     </AuthContext.Provider>
   );
