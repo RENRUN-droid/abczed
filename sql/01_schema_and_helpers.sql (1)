@@ -1,0 +1,186 @@
+-- ABCZed — Étape 1/7 du chantier sécurité : schéma de base + helpers privés anti-récursion.
+-- N'active AUCUNE RLS ici — les policies viennent à l'étape suivante, une fois ce socle vérifié.
+-- Remplace entièrement l'ancien schema.sql (posts génériques, tables ouvertes).
+
+create extension if not exists "pgcrypto";
+
+-- Schéma dédié aux fonctions internes : jamais ajouté à la liste des schémas exposés par la
+-- Data API (Project Settings > API > Exposed schemas). Si ce schéma se retrouve un jour exposé
+-- par erreur, ces fonctions deviennent appelables directement via rpc() par n'importe quel
+-- utilisateur authentifié — c'est précisément ce que ce schéma existe pour empêcher.
+create schema if not exists app_private;
+
+-- ---------------------------------------------------------------------------
+-- Communautés
+-- ---------------------------------------------------------------------------
+create table if not exists communities (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Membres — remplace l'ancien modèle sans authentification.
+-- user_id référence auth.users : c'est LA colonne qui manquait entièrement avant.
+-- ---------------------------------------------------------------------------
+create table if not exists members (
+  id uuid primary key default gen_random_uuid(),
+  community_id uuid not null references communities(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null default 'member' check (role in ('member', 'admin')),
+  status text not null default 'invited' check (status in ('invited', 'active', 'removed')),
+  display_name text,
+  avatar_url text,
+  created_at timestamptz default now(),
+  unique (community_id, user_id)
+);
+
+-- Garde-fou colonne : la RLS ne protège que les LIGNES, pas les colonnes. Un membre autorisé
+-- à modifier "son propre profil" pourrait sinon glisser role/status/community_id dans la même
+-- requête UPDATE.
+-- community_id est STRICTEMENT IMMUABLE, y compris pour un admin : un changement de communauté
+-- se fait par suppression + création d'une nouvelle ligne d'appartenance, jamais par déplacement.
+-- (Vérifié par test : un admin de A pouvait sinon déplacer un membre vers B en lui donnant
+-- role='admin'/status='active' dans la même requête — faille confirmée puis corrigée ici.)
+-- role/status restent modifiables, mais seulement par un admin actif de CETTE communauté.
+create or replace function app_private.protect_sensitive_member_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.community_id is distinct from old.community_id then
+    raise exception 'community_id est immuable : créez/supprimez une appartenance, ne la déplacez jamais.';
+  end if;
+  if new.user_id is distinct from old.user_id then
+    raise exception 'user_id est immuable : impossible de transférer une appartenance à un autre compte (contournerait l''invitation).';
+  end if;
+  if (new.role is distinct from old.role or new.status is distinct from old.status)
+     and not app_private.is_community_admin(old.community_id) then
+    raise exception 'Modification de role/status réservée aux administrateurs de cette communauté.';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function app_private.protect_sensitive_member_columns() from public;
+
+drop trigger if exists trg_protect_sensitive_member_columns on members;
+create trigger trg_protect_sensitive_member_columns
+  before update on members
+  for each row execute function app_private.protect_sensitive_member_columns();
+
+-- ---------------------------------------------------------------------------
+-- Helpers anti-récursion — appelés depuis les policies RLS de l'étape suivante.
+-- SECURITY DEFINER + search_path verrouillé + schéma non exposé : les trois conditions
+-- documentées par Supabase pour qu'un helper de policy ne devienne pas lui-même une faille.
+-- ---------------------------------------------------------------------------
+create or replace function app_private.is_community_member(p_community_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.members
+    where community_id = p_community_id
+      and user_id = auth.uid()
+      and status = 'active'
+  );
+$$;
+
+create or replace function app_private.is_community_admin(p_community_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.members
+    where community_id = p_community_id
+      and user_id = auth.uid()
+      and status = 'active'
+      and role = 'admin'
+  );
+$$;
+
+-- Droits d'exécution verrouillés explicitement : seuls les rôles applicatifs peuvent appeler
+-- ces fonctions (elles ne servent à rien pour un rôle qui n'interroge jamais les tables via elles).
+revoke all on function app_private.is_community_member(uuid) from public;
+revoke all on function app_private.is_community_admin(uuid) from public;
+grant execute on function app_private.is_community_member(uuid) to authenticated;
+grant execute on function app_private.is_community_admin(uuid) to authenticated;
+
+-- Nécessaire pour les policies Storage du bucket avatars : deux comptes partagent-ils au
+-- moins une communauté active ? (un avatar n'est pertinent à montrer qu'aux gens qui
+-- côtoient réellement cette personne, pas à tout utilisateur authentifié d'ABCZed).
+create or replace function app_private.shares_active_community_with(p_target_user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.members m1
+    join public.members m2 on m1.community_id = m2.community_id
+    where m1.user_id = auth.uid() and m1.status = 'active'
+      and m2.user_id = p_target_user_id and m2.status = 'active'
+  );
+$$;
+revoke all on function app_private.shares_active_community_with(uuid) from public;
+grant execute on function app_private.shares_active_community_with(uuid) to authenticated;
+
+-- Nécessaire pour les policies Storage du bucket avatars : contrairement à community-files,
+-- un avatar n'est pas rattaché à une seule communauté — mais son PROPRIÉTAIRE doit quand
+-- même posséder au moins une appartenance active quelque part. Sans ce contrôle, un compte
+-- authentifié sans communauté, ou passé removed partout, garderait la main sur son propre
+-- avatar — contraire à l'invariant "sans membership active = aucun accès applicatif".
+create or replace function app_private.has_any_active_membership()
+returns boolean
+language sql
+security definer
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.members where user_id = auth.uid() and status = 'active'
+  );
+$$;
+revoke all on function app_private.has_any_active_membership() from public;
+grant execute on function app_private.has_any_active_membership() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Invitations — table dédiée, nécessaire à l'atomicité décrite pour l'étape "invitations".
+-- Créée maintenant (structure), sa RLS et sa fonction d'acceptation viendront à cette étape-là.
+--
+-- CORRECTION (2026-09-21, V7.18) : cette définition ne correspondait plus à la table réellement
+-- déployée sur le projet Supabase de l'utilisateur — `create table if not exists` n'a jamais pu
+-- faire converger les deux une fois la vraie table créée par une itération antérieure. Alignée
+-- ici sur le schéma réel (vérifié en direct : information_schema.columns + pg_constraint) : le
+-- jeton n'est jamais stocké en clair (seul son hash SHA-256, `token_hash`, colonne unique),
+-- `invited_by` renommé `created_by`, ajout de `accepted_at`/`accepted_by`. Voir
+-- sql/09_invitations.sql pour le détail de l'incident et les fonctions qui exploitent ce schéma.
+-- ---------------------------------------------------------------------------
+create table if not exists invitations (
+  id uuid primary key default gen_random_uuid(),
+  community_id uuid not null references communities(id) on delete cascade,
+  email text not null,
+  token_hash text not null unique,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'expired')),
+  expires_at timestamptz not null default (now() + interval '7 days'),
+  accepted_at timestamptz,
+  accepted_by uuid references auth.users(id),
+  created_by uuid references auth.users(id),
+  created_at timestamptz default now()
+);
+
+-- Correction demandée après audit : USAGE sur le schéma est nécessaire pour qu'une policy
+-- RLS (exécutée dans le contexte du rôle authenticated) puisse résoudre et appeler les
+-- fonctions de app_private — indépendant de l'exposition Data API. USAGE ne rend PAS le
+-- schéma appelable via rpc() ; seule son inscription dans "Exposed schemas" le ferait,
+-- et app_private n'y figure jamais.
+grant usage on schema app_private to authenticated;
