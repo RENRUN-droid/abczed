@@ -1,6 +1,6 @@
 import { ArrowLeft, MessageCircle, Phone, Send, Mail } from 'lucide-react';
 import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
-import { MEMBERS, childrenOf } from '../data';
+import { childrenOf } from '../data';
 
 // Delta §19 : `phone_number`/`email` uniques sur le membre + flags de partage indépendants
 // (`share_whatsapp`/`share_phone`/`share_sms`/`share_email`) — remplace l'ancien modèle où
@@ -17,8 +17,9 @@ const CONTACT_METHODS = [
 // Note (delta §18) : ce composant ne reçoit plus jamais memberId === 'mem-vous' — App.jsx
 // (fonction openMember) intercepte ce cas en amont et ouvre la modale Mon profil à la place,
 // pour ne jamais présenter ses propres coordonnées comme celles d'un tiers ("Contacter Vous").
-export default function MemberDetail({ memberId, onBack }) {
-  const member = MEMBERS.find((m) => m.id === memberId);
+// V7.18 : `members` reçu en prop (annuaire réel) — remplace l'import direct de MEMBERS.
+export default function MemberDetail({ members, memberId, onBack }) {
+  const member = members.find((m) => m.id === memberId);
   if (!member) return null;
   const kids = childrenOf(member);
   const sharedContacts = CONTACT_METHODS.filter((c) => member[c.shareFlag] && member[c.valueField]);
