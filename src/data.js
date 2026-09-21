@@ -348,8 +348,18 @@ export const MEMBERS = [
   },
 ];
 
+// V7.18 (La Bande branchée à Supabase, voir src/memberDirectory.js) : `relations` peut
+// désormais venir de deux origines — la donnée de démonstration ci-dessus (`{childId, label}`,
+// résolue ici contre CHILDREN) OU un membre réel Supabase (déjà résolu en amont par
+// `mapMemberRow`, `{childId, label, firstName, groupLabel}` complet, sans passage par CHILDREN
+// qui n'existe que pour la démonstration locale). `r.firstName` déjà présent signale la 2e
+// forme — passage tel quel, jamais une seconde résolution CHILDREN qui ne trouverait rien pour
+// un enfant réel. `member.relations || []` (au lieu de `member.relations.map`) : un membre réel
+// sans aucun enfant renseigné n'a pas cette propriété du tout — plantage avant ce correctif.
 export function childrenOf(member) {
-  return member.relations.map((r) => ({ ...CHILDREN.find((c) => c.id === r.childId), label: r.label }));
+  return (member.relations || []).map((r) => (
+    r.firstName ? r : { ...CHILDREN.find((c) => c.id === r.childId), label: r.label }
+  ));
 }
 
 export const SHARE_TYPES = {
