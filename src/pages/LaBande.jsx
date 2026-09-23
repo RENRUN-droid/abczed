@@ -93,7 +93,19 @@ export default function LaBande({ members, membersLoading, membersError, onOpenM
                 {m.firstName.slice(0, 1)}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>{m.firstName} {m.lastName}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>
+                  {m.firstName} {m.lastName}
+                  {/* Point 7 backlog : repère visuel sur sa propre cartouche — `m.id ===
+                      'mem-vous'` est la même sentinelle déjà posée par memberDirectory.js
+                      (mapMemberRow) et déjà utilisée par le court-circuit "Mon profil" dans
+                      App.jsx (openMember, ligne ~618) : source unique de vérité "est-ce moi ?",
+                      jamais une comparaison redondante ici. */}
+                  {m.id === 'mem-vous' && (
+                    <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 700, color: SECTION_THEMES.labande.color }}>
+                      (Vous)
+                    </span>
+                  )}
+                </div>
                 {/* V7.14 (correctif UAT) : ce texte (enfants/groupe du parent, ou statut par
                     défaut) était à 13px — lu en pratique comme trop petit/pas assez appuyé
                     sur mobile face au nom en 700. Passé à 14px/fontWeight 560 (lisible sans
