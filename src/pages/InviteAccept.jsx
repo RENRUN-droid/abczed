@@ -11,11 +11,20 @@ import Logo from '../components/Logo';
 // même principe que Root.jsx/AuthProvider.jsx pour le reste de l'authentification :
 // loading -> not-found | expired | ready (formulaire d'inscription) | wrong-account | success.
 export default function InviteAccept({ token }) {
-  const { session, signUp, signOut, refreshMemberships } = useAuth();
+  // Backlog point 5 (24 sept.) : `signIn`/`authError` (renommé pour ne jamais entrer en
+  // collision avec `error`/`setError`, l'état local déjà utilisé par le parcours d'inscription
+  // ci-dessous) — chemin de connexion pour l'adresse invitée qui possède déjà un compte
+  // confirmé. `signIn()` (AuthProvider.jsx) pose lui-même l'erreur générique "Identifiants
+  // incorrects." dans ce champ de contexte, jamais renvoyée dans son retour (contrairement à
+  // `signUp`) — même endroit déjà lu par Login.jsx, sans conflit possible : les deux pages ne
+  // sont jamais montées en même temps.
+  const { session, signUp, signIn, signOut, refreshMemberships, error: authError } = useAuth();
   const [phase, setPhase] = useState('loading');
   const [invitation, setInvitation] = useState(null);
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -66,6 +75,22 @@ export default function InviteAccept({ token }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, phase, invitation]);
 
+  // Backlog point 5 (24 sept.) — chemin "Se connecter" : `signIn()` ne renvoie qu'un booléen
+  // (voir AuthProvider.jsx), jamais la session elle-même — celle-ci arrive de façon asynchrone
+  // via onAuthStateChange, qui met à jour `session` un instant après. Une fois connecté avec la
+  // même adresse que l'invitation, on rebascule simplement sur l'écran 'ready-signed-in' déjà
+  // existant (celui affiché à un utilisateur qui arrivait déjà connecté) plutôt que de dupliquer
+  // un écran de confirmation — même bouton "Rejoindre ABCZed", même fonction
+  // `handleAcceptSignedIn`, aucune logique nouvelle à ce niveau. Restreint à la phase
+  // 'ready-login' pour la même raison que l'effet 'check-email' ci-dessus : ne jamais réagir à
+  // un `session` qui changerait pour une tout autre raison (rafraîchissement de jeton) pendant
+  // qu'un autre écran, déjà stable, est affiché.
+  useEffect(() => {
+    if (phase !== 'ready-login' || !session || !invitation) return;
+    const sameEmail = (session.user.email || '').toLowerCase() === invitation.email.toLowerCase();
+    setPhase(sameEmail ? 'ready-signed-in' : 'wrong-account');
+  }, [session, phase, invitation]);
+
   async function finishAcceptance(name) {
     try {
       const result = await acceptInvitation(token, name);
@@ -95,6 +120,20 @@ export default function InviteAccept({ token }) {
       // Confirmation d'e-mail activée sur ce projet Supabase — pas de session immédiate.
       setPhase('check-email');
     }
+  }
+
+  // Backlog point 5 (24 sept.) : contrairement à handleSignUp, aucune vérification de succès à
+  // faire ici sur le retour de `signIn()` — un échec laisse `authError` renseigné par
+  // AuthProvider.jsx ("Identifiants incorrects.", déjà affiché ci-dessous) et `session` ne
+  // change simplement pas, donc l'effet 'ready-login' ci-dessus ne se déclenche pas ; un succès
+  // fait le contraire (session mise à jour, effet déclenché) — pas de branchement ok/erreur à
+  // gérer explicitement dans ce composant.
+  async function handleLogin(e) {
+    e.preventDefault();
+    if (loginSubmitting || !loginPassword) return;
+    setLoginSubmitting(true);
+    await signIn(invitation.email, loginPassword);
+    setLoginSubmitting(false);
   }
 
   async function handleAcceptSignedIn() {
@@ -190,6 +229,55 @@ export default function InviteAccept({ token }) {
                 {submitting ? 'Création…' : 'Créer mon compte et rejoindre'}
               </button>
             </form>
+            {/* Backlog point 5 : `signUp()` sur une adresse déjà titulaire d'un compte CONFIRMÉ
+                réussit silencieusement côté Supabase (protection anti-énumération — voir
+                AuthProvider.jsx), sans renvoyer d'erreur ni de session, ce qui affichait "Vérifie
+                ta boîte mail" à tort alors qu'aucun e-mail n'était réellement envoyé. Impossible à
+                détecter automatiquement avant coup — ce lien reste donc un choix manuel, visible
+                d'emblée, pour qui sait déjà avoir un compte plutôt qu'une détection fiable. */}
+            <button
+              type="button"
+              onClick={() => { setError(''); setPhase('ready-login'); }}
+              style={{ ...linkButtonStyle, marginTop: 16 }}
+            >
+              Tu as déjà un compte avec {invitation.email} ? Se connecter
+            </button>
+          </>
+        )}
+
+        {phase === 'ready-login' && invitation && (
+          <>
+            <h1 style={{ fontSize: 24, fontWeight: 800, fontFamily: FONT_DISPLAY, letterSpacing: -0.3, color: INK, textAlign: 'center', margin: '0 0 6px' }}>
+              Content de te revoir !
+            </h1>
+            <p style={{ fontSize: 14.5, color: MUTED, textAlign: 'center', margin: '0 0 28px' }}>
+              Connecte-toi pour rejoindre <strong style={{ color: INK }}>ABCZed</strong>.
+            </p>
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label htmlFor="invite-login-email" style={labelStyle}>Adresse e-mail</label>
+                <input id="invite-login-email" type="email" value={invitation.email} disabled style={{ ...inputStyle, opacity: 0.7 }} />
+              </div>
+              <div>
+                <label htmlFor="invite-login-password" style={labelStyle}>Mot de passe</label>
+                <input
+                  id="invite-login-password" type="password" required autoComplete="current-password"
+                  value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)}
+                  disabled={loginSubmitting} style={inputStyle}
+                />
+              </div>
+              {authError && <p role="alert" style={{ fontSize: 13, color: RED, margin: 0 }}>{authError}</p>}
+              <button type="submit" disabled={loginSubmitting || !loginPassword} style={primaryButtonStyle}>
+                {loginSubmitting ? 'Connexion…' : 'Se connecter et rejoindre'}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => { setPhase('ready-signup'); }}
+              style={{ ...linkButtonStyle, marginTop: 16 }}
+            >
+              Pas encore de compte ? Créer mon compte
+            </button>
           </>
         )}
 
@@ -223,4 +311,8 @@ const primaryButtonStyle = {
 const secondaryButtonStyle = {
   width: '100%', padding: '12px 0', borderRadius: 14, border: `1px solid ${BLUE}`, minHeight: 48,
   fontSize: 14.5, fontWeight: 600, background: 'none', color: BLUE, cursor: 'pointer',
+};
+const linkButtonStyle = {
+  width: '100%', padding: '4px 0', border: 'none', background: 'none', minHeight: 32,
+  fontSize: 13.5, fontWeight: 600, color: BLUE, cursor: 'pointer', textAlign: 'center',
 };
