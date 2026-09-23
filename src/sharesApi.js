@@ -34,8 +34,23 @@ const SIGNED_URL_TTL_SECONDS = 3600; // 1h
 // du déposant (vérifié littéralement à l'insertion). Documentée aussi en tête de
 // sql/08_shares_storage.sql (colonne `shares.file_path`, jamais redéfinie ici, seulement
 // appliquée) : {community_id}/{user_id}/{share_id}-{nom_original}.
+//
+// Correctif recette (23 sept., même session) : un nom de fichier réel contenant un accent
+// et/ou une apostrophe (ex. "Capture d'écran 2026-07-31 081708.png", cas très courant en
+// français) faisait échouer l'upload avec une erreur 400 côté stockage Supabase — confirmé en
+// recette, via la console du navigateur. Le NOM AFFICHÉ dans l'app (`shares.file_name`, envoyé
+// séparément par createShare/updateShare) reste inchangé, intact, avec accents et apostrophe ;
+// seul ce nom TECHNIQUE, utilisé uniquement pour construire le chemin dans le bucket, est
+// nettoyé — accents retirés (NFD + suppression des diacritiques), tout caractère hors
+// lettres/chiffres/point/tiret/underscore remplacé par un underscore.
+function safeStorageName(fileName) {
+  return (fileName || 'fichier')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
 function storagePathFor(communityId, userId, shareId, fileName) {
-  const safeName = (fileName || 'fichier').replace(/[/\\]/g, '_');
+  const safeName = safeStorageName(fileName);
   return `${communityId}/${userId}/${shareId}-${safeName}`;
 }
 
