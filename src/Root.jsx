@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import AccessUnavailable from './pages/AccessUnavailable';
 import NotConfigured from './pages/NotConfigured';
 import InviteAccept from './pages/InviteAccept';
+import ResetPassword from './pages/ResetPassword';
 import LoadingScreen from './components/LoadingScreen';
 import App from './App';
 
@@ -36,6 +37,14 @@ export default function Root() {
   }
   if (status === 'signed-out') {
     return <Login />;
+  }
+  // V7.19 — "mot de passe oublié" : ce statut n'est atteint QUE via l'événement
+  // PASSWORD_RECOVERY de Supabase (AuthProvider.jsx), jamais par une connexion normale.
+  // Prioritaire sur 'authorized'/'authenticated-but-no-access' comme sur toute autre branche
+  // ci-dessous : peu importe l'ancien statut de ce compte, tant que le mot de passe n'a pas été
+  // changé on ne le laisse pas entrer dans l'app avec l'ancien mot de passe encore valide.
+  if (status === 'password-recovery') {
+    return <ResetPassword />;
   }
   if (status === 'authenticated-but-no-access') {
     return <AccessUnavailable />;
