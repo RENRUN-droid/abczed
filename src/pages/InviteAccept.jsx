@@ -43,6 +43,29 @@ export default function InviteAccept({ token }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // V7.19 (correctif recette du 23 septembre) — tant que cet onglet reste sur l'écran "Vérifie
+  // ta boîte mail", confirmer l'e-mail se fait forcément AILLEURS (l'e-mail s'ouvre dans un
+  // autre onglet, ou sur un autre appareil) : cet onglet-ci ne se recharge jamais tout seul.
+  // Avant ce correctif, rien ici ne réagissait à l'arrivée d'une session — il fallait recharger
+  // la page à la main (F5) pour que quoi que ce soit change, ce qui n'était pas du tout évident
+  // pour l'utilisateur (défaut signalé en recette). `session` (AuthProvider.jsx) se met bien à
+  // jour tout seul dès la confirmation — supabase-js synchronise la session entre onglets par
+  // BroadcastChannel/stockage local — le problème n'a jamais été le manque de mise à jour de
+  // `session`, seulement que CE COMPOSANT ne l'observait pas. On a déjà le prénom saisi au
+  // moment de l'inscription (`displayName`, toujours en mémoire ici puisque l'onglet n'a jamais
+  // été rechargé) : autant terminer l'adhésion tout de suite plutôt que de forcer un clic
+  // "Rejoindre" supplémentaire une fois revenu sur l'onglet.
+  // Volontairement restreint à la phase 'check-email' — jamais un effet général sur toute
+  // valeur de `session`, qui écraserait à tort un écran déjà stable comme 'success' au moindre
+  // rafraîchissement de jeton (événement TOKEN_REFRESHED, sans rapport avec l'invitation).
+  useEffect(() => {
+    if (phase !== 'check-email' || !session || !invitation) return;
+    const sameEmail = (session.user.email || '').toLowerCase() === invitation.email.toLowerCase();
+    if (!sameEmail) { setPhase('wrong-account'); return; }
+    finishAcceptance(displayName.trim() || invitation.email.split('@')[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, phase, invitation]);
+
   async function finishAcceptance(name) {
     try {
       const result = await acceptInvitation(token, name);
@@ -114,7 +137,7 @@ export default function InviteAccept({ token }) {
         {phase === 'check-email' && invitation && (
           <MessageCard
             title="Vérifie ta boîte mail"
-            text={`Un e-mail de confirmation vient d'être envoyé à ${invitation.email}. Clique sur le lien qu'il contient, puis reviens sur CE MÊME lien d'invitation pour rejoindre ${invitation.community_name}.`}
+            text={`Un e-mail de confirmation vient d'être envoyé à ${invitation.email}. Ouvre-le et clique sur son lien pour confirmer ton adresse — reviens ensuite sur cet onglet : tu rejoindras alors automatiquement ${invitation.community_name}.`}
           />
         )}
 
