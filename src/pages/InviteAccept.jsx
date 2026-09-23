@@ -18,13 +18,15 @@ export default function InviteAccept({ token }) {
   // incorrects." dans ce champ de contexte, jamais renvoyée dans son retour (contrairement à
   // `signUp`) — même endroit déjà lu par Login.jsx, sans conflit possible : les deux pages ne
   // sont jamais montées en même temps.
-  const { session, signUp, signIn, signOut, refreshMemberships, error: authError } = useAuth();
+  const { session, signUp, signIn, signOut, refreshMemberships, requestPasswordReset, error: authError } = useAuth();
   const [phase, setPhase] = useState('loading');
   const [invitation, setInvitation] = useState(null);
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotError, setForgotError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -134,6 +136,31 @@ export default function InviteAccept({ token }) {
     setLoginSubmitting(true);
     await signIn(invitation.email, loginPassword);
     setLoginSubmitting(false);
+  }
+
+  // Signalé par l'utilisateur en recette (24 sept.) : le bouton "Mot de passe oublié ?" de
+  // Login.jsx (V7.19, déjà résolu — point 2) n'existe que sur CET écran-là ; rien ne l'affiche
+  // sur le nouvel écran de connexion de la page d'invitation, laissant sans issue quiconque a
+  // oublié son mot de passe juste à ce moment précis. Même fonction `requestPasswordReset`
+  // (AuthProvider.jsx) que Login.jsx, mais sans son champ e-mail à saisir : l'adresse est déjà
+  // connue avec certitude (fixée par l'invitation), un seul geste suffit — pas de phase
+  // intermédiaire "confirme avant l'envoi" ajoutée exprès pour ça, elle n'apporterait rien de
+  // plus qu'un clic supplémentaire. Le lien reçu par e-mail ramène sur la racine du site (comme
+  // pour Login.jsx — `redirectTo` de requestPasswordReset ne dépend jamais de la page
+  // d'origine) : après avoir choisi un nouveau mot de passe là-bas, revenir sur CE lien
+  // d'invitation (toujours valide, conservé) affiche alors directement "Rejoindre ABCZed"
+  // (phase `ready-signed-in`, déjà existante) puisque la session sera active à ce moment-là.
+  async function handleForgotPassword() {
+    if (forgotSubmitting) return;
+    setForgotSubmitting(true);
+    setForgotError('');
+    const result = await requestPasswordReset(invitation.email);
+    setForgotSubmitting(false);
+    if (!result.ok) {
+      setForgotError(result.error === 'not-configured' ? "L'application n'est pas configurée." : result.error);
+      return;
+    }
+    setPhase('ready-login-forgot-sent');
   }
 
   async function handleAcceptSignedIn() {
@@ -259,7 +286,17 @@ export default function InviteAccept({ token }) {
                 <input id="invite-login-email" type="email" value={invitation.email} disabled style={{ ...inputStyle, opacity: 0.7 }} />
               </div>
               <div>
-                <label htmlFor="invite-login-password" style={labelStyle}>Mot de passe</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                  <label htmlFor="invite-login-password" style={{ fontSize: 13, fontWeight: 600, color: INK }}>Mot de passe</label>
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={forgotSubmitting}
+                    style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 600, color: BLUE, cursor: 'pointer', opacity: forgotSubmitting ? 0.6 : 1 }}
+                  >
+                    {forgotSubmitting ? 'Envoi…' : 'Mot de passe oublié ?'}
+                  </button>
+                </div>
                 <input
                   id="invite-login-password" type="password" required autoComplete="current-password"
                   value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)}
@@ -267,6 +304,7 @@ export default function InviteAccept({ token }) {
                 />
               </div>
               {authError && <p role="alert" style={{ fontSize: 13, color: RED, margin: 0 }}>{authError}</p>}
+              {forgotError && <p role="alert" style={{ fontSize: 13, color: RED, margin: 0 }}>{forgotError}</p>}
               <button type="submit" disabled={loginSubmitting || !loginPassword} style={primaryButtonStyle}>
                 {loginSubmitting ? 'Connexion…' : 'Se connecter et rejoindre'}
               </button>
@@ -279,6 +317,17 @@ export default function InviteAccept({ token }) {
               Pas encore de compte ? Créer mon compte
             </button>
           </>
+        )}
+
+        {phase === 'ready-login-forgot-sent' && invitation && (
+          <MessageCard
+            title="Vérifie ta boîte mail"
+            text={`Si un compte existe pour ${invitation.email}, un e-mail vient de lui être envoyé avec un lien pour choisir un nouveau mot de passe. Une fois ton nouveau mot de passe choisi, reviens sur ce lien d'invitation.`}
+          >
+            <button type="button" onClick={() => setPhase('ready-login')} style={secondaryButtonStyle}>
+              Retour à la connexion
+            </button>
+          </MessageCard>
         )}
 
         {phase === 'error' && (
