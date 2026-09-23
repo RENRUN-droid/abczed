@@ -10,7 +10,6 @@ import { openableCardProps } from '../attachmentCardA11y';
 import ActionButton from '../components/ActionButton';
 import PageTitle from '../components/PageTitle';
 
-const ME = 'Vous';
 const ICONS = { document: FileText, photo: Image, lien: Link2, info: Info };
 
 function fmtDate(dateStr) {
@@ -40,6 +39,12 @@ export default function Partages({
   highlightShareId, onHighlightConsumed,
   cameFromAccueil, onBackToAccueil,
   restoreState, onRestoreConsumed,
+  // Backlog point 4 (23 sept.) : Partages branché à Supabase — `currentUserId`/`isAdmin` pour
+  // savoir QUI peut modifier/supprimer un partage (même règle que Messages.jsx : l'auteur ou un
+  // admin de la communauté, jamais une comparaison sur un nom affiché) ; `sharesLoading`/
+  // `sharesError`, états dédiés à ce module (même principe que messagesLoading/messagesError),
+  // jamais confondus avec ceux d'un autre module.
+  currentUserId, isAdmin, sharesLoading, sharesError,
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
   const [flashId, setFlashId] = useState(null);
@@ -128,6 +133,20 @@ export default function Partages({
         </button>
       </div>
 
+      {/* Backlog point 4 : états dédiés Partages (mêmes principes que Messages.jsx) — une
+          erreur réelle reste affichée telle quelle, jamais de repli silencieux vers une donnée
+          de démonstration ; le chargement initial n'affiche aucun contenu tant qu'il est en
+          cours (pas de flash "Encore aucun partage" trompeur pendant le premier chargement). */}
+      {sharesError && (
+        <div style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12.5, color: '#8A2E1F' }}>
+          {sharesError}
+        </div>
+      )}
+
+      {sharesLoading ? (
+        <p style={{ textAlign: 'center', padding: 40, opacity: 0.5, fontSize: 13 }}>Chargement des partages…</p>
+      ) : (
+      <>
       {filtered.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px 20px', opacity: 0.6 }}>
           <FolderOpen size={32} color={MUTED} style={{ marginBottom: 10 }} />
@@ -146,7 +165,17 @@ export default function Partages({
         {filtered.map((s) => {
           const Icon = ICONS[s.type];
           const linkedEvent = s.linkedEventId ? events.find((e) => e.id === s.linkedEventId) : null;
-          const isMine = s.author === ME;
+          // Backlog point 4 : comparaison sur l'auteur RÉEL (authorId === currentUserId), jamais
+          // sur un nom affiché — même règle que Messages.jsx (`isMine = m.authorId ===
+          // currentUserId`). L'ancienne comparaison `s.author === 'Vous'` ne fonctionnait que
+          // pour la donnée de démonstration locale, où l'auteur "Vous" était une chaîne figée ;
+          // un partage réel a pour auteur le display_name réel de son auteur (jamais "Vous").
+          const isMine = s.authorId === currentUserId;
+          // Même règle que la policy RLS delete_own_share_or_admin/update_own_share_or_admin
+          // (sql/02_rls.sql) : l'auteur OU un admin de la communauté peut modifier/supprimer —
+          // jamais l'auteur seul, sans quoi le menu resterait invisible à un admin alors que
+          // l'action lui serait pourtant acceptée côté serveur.
+          const canManage = isMine || isAdmin;
           // Item 9 (correctif UAT phase 3) : la carte entière ouvre désormais "la fiche ou la
           // ressource" du partage — pour un document/lien avec un `href` réel, exactement la
           // même action que le bouton "Ouvrir" déjà existant (openableCardProps ouvre le même
@@ -191,7 +220,7 @@ export default function Partages({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                     <span style={{ fontSize: 15, fontWeight: 700 }}>{s.title}</span>
-                    {isMine && (
+                    {canManage && (
                       // Item 9 : la carte entière étant désormais cliquable (openableCardProps
                       // ci-dessus), ce bouton doit stopper sa propre propagation pour ne jamais
                       // déclencher AUSSI l'action de carte (ouvrir le fichier/lien) en plus
@@ -227,7 +256,12 @@ export default function Partages({
                     <p style={{ fontSize: 12.5, color: BLUE, margin: '6px 0 0' }}>{s.domain}</p>
                   )}
 
-                  <p style={{ fontSize: 11.5, color: MUTED, margin: '8px 0 0' }}>Partagé par {s.author} · {fmtDate(s.date)}</p>
+                  {/* Backlog point 4 : "Vous" seulement pour SES PROPRES partages (isMine),
+                      jamais pour ceux d'un autre membre — même règle d'affichage que
+                      Messages.jsx (`isMine ? 'Vous' : m.author`), plus l'ancienne comparaison
+                      `s.author === 'Vous'`, qui affichait à tort le display_name réel de
+                      l'auteur pour ses propres partages. */}
+                  <p style={{ fontSize: 11.5, color: MUTED, margin: '8px 0 0' }}>Partagé par {isMine ? 'Vous' : s.author} · {fmtDate(s.date)}</p>
 
                   {linkedEvent && (
                     // Brief §28 : ouvrir l'événement lié reste possible, mais le retour doit
@@ -266,12 +300,12 @@ export default function Partages({
                       );
                     })()}
                     {s.type === 'photo' && (
-                      // Item 11 : réellement ouvrable dès qu'une vraie photo a été importée via
-                      // "Ajouter un partage" (photoDataUrl) — le texte "aucune photo de
-                      // démonstration..." reste affiché tel quel pour les albums de
-                      // démonstration qui n'en ont jamais eu (ex. l'album zoo, hors périmètre :
-                      // src/data.js non touché par cette phase).
-                      <ActionButton icon={ExternalLink} href={s.photoDataUrl} title={s.photoDataUrl ? 'Ouvrir la photo' : 'Aucune photo de démonstration disponible pour cet album'}>Ouvrir</ActionButton>
+                      // Backlog point 4 : `photoDataUrl` est désormais une vraie URL signée
+                      // Supabase Storage (sharesApi.fetchShares), jamais une `data:` URL locale.
+                      // `null` reste possible (URL signée en échec pour ce fichier précis — voir
+                      // le commentaire dans sharesApi.js) : le bouton reste alors désactivé avec
+                      // un motif honnête plutôt que de prétendre une ressource ouvrable.
+                      <ActionButton icon={ExternalLink} href={s.photoDataUrl} title={s.photoDataUrl ? 'Ouvrir la photo' : 'Photo indisponible pour le moment — réessaie plus tard'}>Ouvrir</ActionButton>
                     )}
                     {s.type === 'lien' && (
                       <ActionButton icon={ExternalLink} href={s.linkUrl} title="Ouvrir dans un nouvel onglet">Ouvrir</ActionButton>
@@ -307,6 +341,8 @@ export default function Partages({
           );
         })}
       </div>
+      </>
+      )}
     </div>
   );
 }
