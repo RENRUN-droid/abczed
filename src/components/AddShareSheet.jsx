@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { X, FileText, Image, Link2, Info, Paperclip } from 'lucide-react';
 import { RED, MUTED, CARD_BORDER, SHARE_TYPE_THEMES, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 import { useModalA11y } from '../useModalA11y';
@@ -25,6 +25,28 @@ function fieldStyle(hasError) {
 function ErrorText({ id, message }) {
   if (!message) return null;
   return <p id={id} style={{ margin: '4px 0 0', fontSize: 12, fontWeight: 600, color: RED }}>{message}</p>;
+}
+
+// Signalé en recette (23 sept.) : le bloc de champ propre à chaque type (Fichier/Lien/Photo/
+// rien pour Information) n'a pas la même hauteur — passer à "Information" fait donc rétrécir
+// le cadre d'un coup, perçu comme un décalage. Comportement normal (moins de champs = moins de
+// hauteur), pas un bug — mais la demande explicite est d'adoucir la transition, pas de la
+// supprimer. Pas de librairie : simple mesure de la hauteur réelle du contenu (scrollHeight)
+// après chaque changement de type, appliquée en hauteur explicite avec une transition CSS.
+// Premier montage volontairement SANS animation (départ à 'auto', un navigateur n'anime jamais
+// depuis 'auto' — la bascule vers la première valeur en pixels est donc instantanée) : seul un
+// changement de type en cours d'utilisation doit être adouci, pas l'ouverture du formulaire.
+function AnimatedTypeFields({ children }) {
+  const innerRef = useRef(null);
+  const [height, setHeight] = useState('auto');
+  useLayoutEffect(() => {
+    setHeight(innerRef.current ? innerRef.current.scrollHeight : 0);
+  }, [children]);
+  return (
+    <div style={{ height, overflow: 'hidden', transition: 'height 0.25s ease' }}>
+      <div ref={innerRef}>{children}</div>
+    </div>
+  );
 }
 
 function formatBytes(n) {
@@ -210,6 +232,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
             <ErrorText id="ass-error-title" message={errors.title} />
           </div>
 
+          <AnimatedTypeFields>
           {type === 'document' && (
             <div>
               <label htmlFor="ass-file" style={labelStyle}>Fichier</label>
@@ -284,6 +307,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
           {/* Item 11 : Information reste texte seul (titre + description ci-dessous couvrent
               déjà ce type) — aucun champ fichier/lien requis, confirmé non cassé par cette
               passe (rendu conditionnel déjà correct avant, non modifié ici). */}
+          </AnimatedTypeFields>
 
           <div>
             <label htmlFor="ass-description" style={labelStyle}>Description (optionnel)</label>
