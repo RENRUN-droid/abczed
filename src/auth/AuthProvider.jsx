@@ -6,7 +6,7 @@ const AuthContext = createContext(null);
 
 // États explicites, un seul écran possible par état — jamais de flash de contenu protégé.
 // not-configured | loading-session | signed-out | authenticated-checking-membership
-// | authorized | authenticated-but-no-access
+// | authorized | authenticated-but-no-access | password-recovery
 
 export function AuthProvider({ children }) {
   const [status, setStatus] = useState(isSupabaseConfigured ? 'loading-session' : 'not-configured');
@@ -62,7 +62,23 @@ export function AuthProvider({ children }) {
     // Un seul point d'écoute : onAuthStateChange fournit déjà la session initiale à
     // l'abonnement (pas besoin d'appeler getSession() en plus — ça créerait exactement le
     // double appel / la requête concurrente qu'on veut éviter).
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      // V7.19 — "mot de passe oublié" : en ouvrant le lien reçu par e-mail, Supabase authentifie
+      // une session TEMPORAIRE dédiée au seul changement de mot de passe (le SDK détecte tout
+      // seul le jeton de récupération dans l'URL, quelle que soit la page d'atterrissage — voir
+      // requestPasswordReset ci-dessous, redirectTo pointe simplement vers la racine du site).
+      // Surtout ne jamais enchaîner sur loadMemberships ici comme pour une connexion normale :
+      // ce serait faire entrer l'utilisateur dans l'app avec son ANCIEN mot de passe encore
+      // valide, sans être jamais passé par l'écran de changement — la session `PASSWORD_RECOVERY`
+      // doit rester bloquée sur ResetPassword.jsx (Root.jsx) tant que updatePassword() n'a pas
+      // été appelé avec succès.
+      if (event === 'PASSWORD_RECOVERY') {
+        setSession(newSession);
+        requestId.current++; // annule toute vérification de membership encore en vol
+        setError('');
+        setStatus('password-recovery');
+        return;
+      }
       setSession(newSession);
       if (newSession) {
         loadMemberships(newSession);
@@ -110,6 +126,35 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
   }
 
+  // V7.19 — "mot de passe oublié" (Login.jsx). Message de succès volontairement identique que
+  // l'adresse corresponde ou non à un compte existant — même logique anti-énumération que le
+  // message d'erreur générique de signIn() ci-dessus : ne jamais laisser un visiteur déduire
+  // qu'une adresse est enregistrée ou non à partir de la réponse de ce formulaire.
+  async function requestPasswordReset(email) {
+    if (!isSupabaseConfigured) return { ok: false, error: 'not-configured' };
+    // redirectTo pointe vers la racine du site, jamais une page dédiée : le SDK Supabase détecte
+    // tout seul le jeton de récupération présent dans l'URL au chargement, quelle que soit la
+    // page — inutile (et fragile) de coder un chemin spécifique en dur ici ET côté Supabase.
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (err) return { ok: false, error: err.message };
+    return { ok: true };
+  }
+
+  // Appelé depuis ResetPassword.jsx (Root.jsx, status === 'password-recovery') une fois le
+  // nouveau mot de passe saisi. Après succès, relance loadMemberships nous-mêmes : la session de
+  // récupération est déjà active côté Supabase, mais aucun nouvel événement onAuthStateChange ne
+  // sera émis pour signaler "le mot de passe est changé, tu peux continuer" — sans cet appel
+  // explicite, l'utilisateur resterait bloqué sur l'écran de changement de mot de passe.
+  async function updatePassword(newPassword) {
+    if (!isSupabaseConfigured) return { ok: false, error: 'not-configured' };
+    const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+    if (err) return { ok: false, error: err.message };
+    if (session) loadMemberships(session);
+    return { ok: true };
+  }
+
   // V7.18 — après accept_invitation() (nouvelle ligne `members` créée côté serveur),
   // AuthProvider ne le sait pas tout seul : `memberships`/`activeCommunity`/`status` ne se
   // recalculent que sur un événement onAuthStateChange, jamais sur une simple mutation en base.
@@ -122,7 +167,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ status, session, memberships, activeCommunity, error, signIn, signUp, signOut, refreshMemberships }}>
+    <AuthContext.Provider value={{ status, session, memberships, activeCommunity, error, signIn, signUp, signOut, refreshMemberships, requestPasswordReset, updatePassword }}>
       {children}
     </AuthContext.Provider>
   );
