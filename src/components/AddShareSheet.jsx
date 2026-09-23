@@ -1,10 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, FileText, Image, Link2, Info, Paperclip } from 'lucide-react';
 import { RED, MUTED, CARD_BORDER, SHARE_TYPE_THEMES, SECTION_THEMES, FONT_DISPLAY } from '../theme';
-import { linkableEvents } from '../data';
 import { useModalA11y } from '../useModalA11y';
 import { isValidAbsoluteUrl } from '../urlValidation';
-import { MAX_LOCAL_FILE_BYTES } from '../sharesStorage';
+import { MAX_SHARE_FILE_BYTES } from '../sharesApi';
 
 const TYPES = [
   { key: 'document', label: 'Fichier', icon: FileText },
@@ -35,22 +34,24 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
-export default function AddShareSheet({ onClose, onCreate, editingShare }) {
+export default function AddShareSheet({ onClose, onCreate, editingShare, events }) {
   const isEditing = Boolean(editingShare);
   const [type, setType] = useState(editingShare?.type || 'document');
   const [title, setTitle] = useState(editingShare?.title || '');
   const [description, setDescription] = useState(editingShare?.description || '');
   const [linkUrl, setLinkUrl] = useState(editingShare?.linkUrl || '');
   const [linkedEventId, setLinkedEventId] = useState(editingShare?.linkedEventId || '');
-  // Item 11 : remplace le champ texte libre "Nom du fichier" — un vrai fichier choisi via
-  // <input type="file">, lu en `data:` URL (FileReader) pour que "Ouvrir"/"Télécharger"
-  // fonctionnent réellement dans cette démo locale (aucun Supabase Storage réel ici,
-  // BUSINESS_DATA_FROM_SUPABASE=false — voir sql/08_shares_storage.sql pour le schéma prévu
-  // côté vrai Storage). `null` tant qu'aucun nouveau fichier n'a été choisi — en modification,
-  // le fichier déjà enregistré (editingShare.fileName/fileDataUrl) reste utilisé si non
-  // remplacé (voir submit()).
+  // Backlog point 4 (23 sept.) : un vrai fichier choisi via <input type="file">, transmis TEL
+  // QUEL (objet File) à onCreate — src/sharesApi.js l'envoie directement à Supabase Storage.
+  // Plus de lecture FileReader/`data:` URL ici : celle-ci n'existait que pour la démonstration
+  // locale d'avant ce lot (localStorage, quota ~5 Mo/origine — voir sql/08_shares_storage.sql,
+  // qui documentait déjà ce schéma cible). `null` tant qu'aucun NOUVEAU fichier n'a été choisi —
+  // en modification, le fichier déjà enregistré (editingShare.fileName/photoDataUrl, résolu en
+  // URL signée par sharesApi.fetchShares) reste utilisé si non remplacé (voir submit()).
   const [documentFile, setDocumentFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
+  // Aperçu local avant envoi (URL objet, jamais transmise à onCreate — seul `photoFile` l'est).
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -63,23 +64,31 @@ export default function AddShareSheet({ onClose, onCreate, editingShare }) {
   const linkRef = useRef(null);
   const FIELD_REFS = { title: titleRef, file: fileRef, photo: photoRef, linkUrl: linkRef };
 
-  function readFile(fileList, kind) {
+  // Révoquée à chaque remplacement de photo et au démontage — jamais de fuite mémoire sur une
+  // longue session (plusieurs photos essayées avant validation).
+  useEffect(() => {
+    return () => { if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl); };
+  }, [photoPreviewUrl]);
+
+  // P4 (même règle que LinkEventPicker, src/pages/Messages.jsx) : événements RÉELS de la
+  // communauté (prop reçue de App.jsx, agenda Supabase) — plus jamais MOCK_EVENTS/data.js.
+  // Rappels d'anniversaire explicitement exclus, même exclusion que partout ailleurs.
+  const linkable = (events || []).filter((e) => e.category !== 'anniversaire');
+
+  function pickFile(fileList, kind) {
     const file = fileList?.[0];
     if (!file) return;
-    if (file.size > MAX_LOCAL_FILE_BYTES) {
-      setErrors((prev) => ({ ...prev, [kind]: `Fichier trop volumineux pour cette démo locale (maximum ${formatBytes(MAX_LOCAL_FILE_BYTES)}).` }));
+    if (file.size > MAX_SHARE_FILE_BYTES) {
+      setErrors((prev) => ({ ...prev, [kind]: `Fichier trop volumineux (maximum ${formatBytes(MAX_SHARE_FILE_BYTES)}).` }));
       return;
     }
     setErrors((prev) => { const next = { ...prev }; delete next[kind]; return next; });
-    const reader = new FileReader();
-    reader.onload = () => {
-      const entry = { name: file.name, size: file.size, dataUrl: reader.result };
-      if (kind === 'file') setDocumentFile(entry); else setPhotoFile(entry);
-    };
-    reader.onerror = () => {
-      setErrors((prev) => ({ ...prev, [kind]: "Impossible de lire ce fichier sur cet appareil — réessaie ou choisis-en un autre." }));
-    };
-    reader.readAsDataURL(file);
+    if (kind === 'file') {
+      setDocumentFile(file);
+    } else {
+      setPhotoFile(file);
+      setPhotoPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(file); });
+    }
   }
 
   // Item 13 (même patron que CreateEventSheet.jsx) : validation réelle à la soumission, jamais
@@ -127,29 +136,20 @@ export default function AddShareSheet({ onClose, onCreate, editingShare }) {
       description: description.trim(),
       linkedEventId: linkedEventId || null,
     };
-    if (type === 'document') {
-      const f = documentFile;
-      payload.fileName = f ? f.name : editingShare?.fileName;
-      payload.fileSize = f ? formatBytes(f.size) : editingShare?.fileSize;
-      // Nouveau fichier -> sa data: URL ; sinon (modification sans remplacement) -> celle déjà
-      // enregistrée, s'il y en avait une (undefined sinon, jamais une chaîne vide trompeuse).
-      payload.fileDataUrl = f ? f.dataUrl : editingShare?.fileDataUrl;
-    }
-    if (type === 'photo') {
-      const f = photoFile;
-      payload.photoDataUrl = f ? f.dataUrl : editingShare?.photoDataUrl;
-      payload.photoCount = editingShare?.photoCount || 1;
-    }
     if (type === 'lien') {
       const trimmed = linkUrl.trim();
       payload.linkUrl = trimmed;
       payload.domain = trimmed.replace(/^https?:\/\//, '').split('/')[0];
     }
-    // Item 11 : App.jsx renvoie désormais { ok, error? } (persistance locale réelle,
-    // src/sharesStorage.js) au lieu de rien — un échec (ex. quota localStorage dépassé) garde
-    // le formulaire ouvert avec toutes les valeurs déjà saisies intactes, erreur affichée
-    // inline, jamais une fermeture silencieuse qui ferait croire le partage enregistré.
-    const result = await onCreate(payload);
+    // Backlog point 4 : le fichier réel (objet File, `undefined` si aucun nouveau fichier
+    // choisi) part directement vers App.jsx/sharesApi.js — plus aucune donnée de fichier
+    // construite ici (nom/taille/URL sont désormais dérivés côté sharesApi.js, à partir du
+    // File lui-même et de l'upload Storage réel).
+    const file = type === 'document' ? documentFile : type === 'photo' ? photoFile : null;
+    // App.jsx renvoie { ok, error? } — un échec (réseau, RLS, upload Storage) garde le
+    // formulaire ouvert avec toutes les valeurs déjà saisies intactes, erreur affichée inline,
+    // jamais une fermeture silencieuse qui ferait croire le partage enregistré.
+    const result = await onCreate(payload, file);
     setSaving(false);
     if (result && result.ok === false) {
       setSubmitError(result.error || "Une erreur est survenue — réessaie.");
@@ -215,7 +215,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare }) {
                 // Types raisonnables pour un partage familial : documents courants + images
                 // (une photo scannée d'un formulaire papier reste un cas réel fréquent).
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*"
-                onChange={(e) => readFile(e.target.files, 'file')}
+                onChange={(e) => pickFile(e.target.files, 'file')}
                 aria-invalid={errors.file ? 'true' : undefined}
                 aria-describedby={errors.file ? 'ass-error-file' : undefined}
                 style={fieldStyle(errors.file)}
@@ -258,16 +258,17 @@ export default function AddShareSheet({ onClose, onCreate, editingShare }) {
                 // existante dans la pellicule, contrairement à `capture="environment"` seul
                 // sur certains anciens navigateurs ; laissé sans valeur forcée pour ça.
                 capture="environment"
-                onChange={(e) => readFile(e.target.files, 'photo')}
+                onChange={(e) => pickFile(e.target.files, 'photo')}
                 aria-invalid={errors.photo ? 'true' : undefined}
                 aria-describedby={errors.photo ? 'ass-error-photo' : undefined}
                 style={fieldStyle(errors.photo)}
               />
-              {/* Item 11 : vraie miniature d'aperçu avant envoi — remplace le texte
-                  "non disponible" qui existait avant cette passe. */}
+              {/* Miniature d'aperçu avant envoi — URL objet locale (photoPreviewUrl) pour un
+                  nouveau fichier tout juste choisi, sinon l'URL signée déjà résolue par
+                  sharesApi.fetchShares (editingShare.photoDataUrl) en modification. */}
               {(photoFile || editingShare?.photoDataUrl) && (
                 <img
-                  src={photoFile ? photoFile.dataUrl : editingShare.photoDataUrl}
+                  src={photoFile ? photoPreviewUrl : editingShare.photoDataUrl}
                   alt="Aperçu de la photo choisie"
                   style={{ marginTop: 8, width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, border: `1px solid ${CARD_BORDER}` }}
                 />
@@ -294,7 +295,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare }) {
             <label htmlFor="ass-linked-event" style={labelStyle}>Événement associé (facultatif)</label>
             <select id="ass-linked-event" value={linkedEventId} onChange={(e) => setLinkedEventId(e.target.value)} style={inputStyle}>
               <option value="">Aucun événement</option>
-              {linkableEvents().map((e) => (
+              {linkable.map((e) => (
                 <option key={e.id} value={e.id}>{e.title}</option>
               ))}
             </select>
