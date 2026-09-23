@@ -148,10 +148,10 @@ export default function InviteAccept({ token }) {
         )}
 
         {phase === 'ready-signed-in' && invitation && (
-          <MessageCard title="Rejoindre la communauté" text={`Tu es connecté avec ${session.user.email}. Confirme pour rejoindre ${invitation.community_name}.`}>
+          <MessageCard title="Rejoindre ABCZed" text={`Tu es connecté avec ${session.user.email}. Confirme pour rejoindre ABCZed.`}>
             {error && <p role="alert" style={{ fontSize: 13, color: RED, margin: '0 0 10px' }}>{error}</p>}
             <button onClick={handleAcceptSignedIn} disabled={submitting} style={primaryButtonStyle}>
-              {submitting ? 'Un instant…' : `Rejoindre ${invitation.community_name}`}
+              {submitting ? 'Un instant…' : 'Rejoindre ABCZed'}
             </button>
           </MessageCard>
         )}
