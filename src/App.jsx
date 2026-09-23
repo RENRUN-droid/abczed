@@ -17,9 +17,12 @@ import AddShareSheet from './components/AddShareSheet';
 import Toast from './components/Toast';
 // V7.7 (P2/P9) : GENERAL_THREAD (MOCK_THREAD) n'est plus importé ici — brief explicite,
 // "absence totale de MOCK_THREAD" une fois Messages connecté à Supabase (MESSAGES_FROM_SUPABASE).
-// MOCK_EVENTS reste nécessaire (résolution de repli pour l'Agenda déjà en place, et Partages/
-// La Bande qui restent des données locales dans ce lot).
-import { EVENTS as MOCK_EVENTS, SHARES as MOCK_SHARES, MEMBERS } from './data';
+// MOCK_EVENTS reste nécessaire (résolution de repli pour un événement encore référencé par une
+// donnée de démonstration ancienne — voir resolveEventById plus bas). SHARES (données de
+// démonstration Partages) n'est plus importé ici depuis le 23 septembre (backlog point 4) —
+// Partages lit désormais Supabase, voir SHARES_FROM_SUPABASE ci-dessous ; SHARES reste sur
+// disque dans data.js pour mémoire, même sort que GENERAL_THREAD avant elle.
+import { EVENTS as MOCK_EVENTS, MEMBERS } from './data';
 import * as agendaApi from './agendaApi';
 // V7.7 : module dédié Messages, jamais l'ancien api.js (voir le commentaire en tête de
 // src/messagesApi.js — author_name/avatar_color/member_name texte libre, incompatibles avec le
@@ -34,25 +37,28 @@ import * as agendaApi from './agendaApi';
 import * as messagesApi from './messagesApi';
 // V7.18 : module dédié La Bande (annuaire réel), même principe que messagesApi.js/agendaApi.js.
 import * as membersApi from './membersApi';
+// Backlog point 4 (23 sept.) : module dédié Partages, même principe — voir le commentaire en
+// tête de src/sharesApi.js pour le détail (table/policies/bucket déjà en place, jamais branchés
+// avant ce lot).
+import * as sharesApi from './sharesApi';
 import { useAuth } from './auth/AuthProvider';
 import { BG, INK, BLUE, RED } from './theme';
 import { captureNavState, clearNavState } from './navMemory';
 import { resolveEventById } from './resolveEvent';
 import { toggleShareFlag } from './shareFlags';
 import { setSectionOrigin, clearSectionOrigin } from './sectionOrigin';
-import { localIso } from './localDate.js';
 import { pathForState, stateForPath } from './router';
 import { createReloadScheduler } from './reloadScheduler';
-import { readSharesFromStorage, writeSharesToStorage, getBrowserStorage } from './sharesStorage';
-// Point 3 (recette réelle sur PC) : les deux drapeaux vivent maintenant dans un module dédié
-// (src/dataSourceFlags.js), pas déclarés ici — Messages.jsx doit pouvoir lire
-// BUSINESS_DATA_FROM_SUPABASE pour son bandeau de confidentialité sans créer d'import
+// src/sharesStorage.js (persistance locale des partages, ère pré-Supabase) n'est plus importé
+// ici depuis le 23 septembre — reste sur disque, même sort que src/api.js (jamais supprimé,
+// simplement plus jamais appelé par App.jsx).
+// Point 3 (recette réelle sur PC) : les drapeaux vivent dans un module dédié
+// (src/dataSourceFlags.js), pas déclarés ici — Messages.jsx doit pouvoir lire son propre
+// drapeau (MESSAGES_FROM_SUPABASE) pour son bandeau de confidentialité sans créer d'import
 // circulaire avec App.jsx (qui importe lui-même Messages.jsx comme composant de page). Mêmes
 // valeurs, mêmes commentaires qu'avant ce déplacement — voir ce module pour le détail de
 // l'arbitrage derrière chaque drapeau.
-import { BUSINESS_DATA_FROM_SUPABASE, AGENDA_FROM_SUPABASE, MESSAGES_FROM_SUPABASE, MEMBERS_FROM_SUPABASE } from './dataSourceFlags';
-
-const ME = 'Vous';
+import { AGENDA_FROM_SUPABASE, MESSAGES_FROM_SUPABASE, MEMBERS_FROM_SUPABASE, SHARES_FROM_SUPABASE } from './dataSourceFlags';
 
 // memberships est reçu mais pas encore utilisé dans ce bloc — disponible pour la
 // prochaine phase (migration des écrans métier), pas juste accessible "par accident"
@@ -110,18 +116,12 @@ export default function App({ activeCommunity, memberships }) {
   const [showMyProfile, setShowMyProfile] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
   const [editingShare, setEditingShare] = useState(null);
-  // Item 11 (correctif UAT phase 3) : `shares` était un simple useState(MOCK_SHARES), perdu à
-  // chaque rechargement réel (F5) — même les partages ajoutés PENDANT la session disparaissaient.
-  // Initialise désormais depuis le stockage local (src/sharesStorage.js) UNIQUEMENT quand
-  // BUSINESS_DATA_FROM_SUPABASE est faux (jamais l'inverse : le jour où ce drapeau passera à
-  // `true`, les partages viendront réellement de Supabase, et ce stockage local ne doit plus
-  // jamais être consulté ni écrit — voir handleCreateShare/handleDeleteShare ci-dessous, qui
-  // appliquent la même garde). `getBrowserStorage()` renvoie `null` de façon défensive
-  // (navigation privée, etc.) — `readSharesFromStorage` retombe alors simplement sur
-  // MOCK_SHARES, comme une première visite.
-  const [shares, setShares] = useState(() => (
-    BUSINESS_DATA_FROM_SUPABASE ? MOCK_SHARES : readSharesFromStorage(getBrowserStorage(), MOCK_SHARES)
-  ));
+  // Backlog point 4 (23 sept.) — Partages branché à Supabase, même principe que `thread`/
+  // `members` : état DÉDIÉ, jamais de repli MOCK_SHARES une fois SHARES_FROM_SUPABASE actif
+  // (voir loadShares ci-dessous, seul responsable de son remplissage).
+  const [shares, setShares] = useState([]);
+  const [sharesLoading, setSharesLoading] = useState(SHARES_FROM_SUPABASE);
+  const [sharesError, setSharesError] = useState('');
   const [rsvpBusy, setRsvpBusy] = useState(false);
   // V7.11 (P1) — un seul ordonnanceur partagé pour toute la session (App.jsx ne se démonte
   // jamais), par domaine ('messages' couvre messages+réactions, 'agenda' couvre
@@ -405,6 +405,48 @@ export default function App({ activeCommunity, memberships }) {
     });
     return unsubscribe;
   }, [communityId, loadMessages]);
+
+  // ---------------------------------------------------------------------------------------
+  // Backlog point 4 (23 sept.) — Partages. Même méthode exacte que Messages ci-dessus
+  // (identifiant de requête incrémenté, réinitialisation au changement de communauté,
+  // ordonnanceur partagé 'shares', Realtime avec rechargement complet plutôt que fusion locale
+  // du payload) — voir les commentaires détaillés du bloc Messages pour le raisonnement complet
+  // derrière chaque choix, non redupliqués ici mot pour mot.
+  // ---------------------------------------------------------------------------------------
+  const sharesRequestId = useRef(0);
+  const loadShares = useCallback(async () => {
+    if (!SHARES_FROM_SUPABASE || !communityId) return;
+    const myRequestId = ++sharesRequestId.current;
+    setSharesError('');
+    try {
+      const rows = await sharesApi.fetchShares(communityId);
+      if (myRequestId !== sharesRequestId.current) return; // réponse obsolète, ignorée
+      setShares(rows);
+    } catch (err) {
+      if (myRequestId !== sharesRequestId.current) return;
+      setSharesError("Impossible de charger les partages — vérifie ta connexion et réessaie.");
+      throw err;
+    } finally {
+      if (myRequestId === sharesRequestId.current) setSharesLoading(false);
+    }
+  }, [communityId]);
+
+  useEffect(() => {
+    if (!SHARES_FROM_SUPABASE) return;
+    setShares([]);
+    setSharesLoading(true);
+    setSharesError('');
+    reloadSchedulerRef.current.reset('shares');
+    loadShares().catch(() => {});
+  }, [communityId, loadShares]);
+
+  useEffect(() => {
+    if (!SHARES_FROM_SUPABASE || !communityId) return;
+    const unsubscribe = sharesApi.subscribeToShares(communityId, () => {
+      reloadSchedulerRef.current.request('shares', loadShares).catch(() => {});
+    });
+    return unsubscribe;
+  }, [communityId, loadShares]);
 
   // P1 (exercice de correction V7.5) : `view`/`selectedEventId`/`eventReturnTo` vivaient
   // uniquement dans cet état React — une actualisation du navigateur perdait tout et renvoyait
@@ -1146,50 +1188,52 @@ export default function App({ activeCommunity, memberships }) {
     return true;
   }
 
-  // Item 11 : persiste `next` dans le stockage local (src/sharesStorage.js), UNIQUEMENT quand
-  // BUSINESS_DATA_FROM_SUPABASE est faux — même garde qu'à l'initialisation de `shares`
-  // ci-dessus. Renvoie { ok, error? } pour que l'appelant (AddShareSheet.jsx) puisse afficher
-  // une vraie erreur inline (ex. quota localStorage dépassé) au lieu d'une fermeture
-  // silencieuse qui ferait croire le partage enregistré alors qu'il ne l'est pas.
-  function persistShares(next) {
-    setShares(next);
-    if (BUSINESS_DATA_FROM_SUPABASE) return { ok: true };
-    return writeSharesToStorage(getBrowserStorage(), next);
-  }
-
-  function handleCreateShare(payload) {
-    // Local uniquement — jamais branché à Supabase tant que l'authentification n'existe pas.
-    if (payload.id) {
-      const next = shares.map((s) => (s.id === payload.id ? { ...s, ...payload } : s));
-      return persistShares(next);
+  // Backlog point 4 (23 sept.) — création/modification réelles via sharesApi.js. Même contrat
+  // de retour qu'avant cette bascule ({ ok, error? }) pour qu'AddShareSheet.jsx n'ait rien à
+  // changer de son propre côté : un échec (réseau, RLS, upload Storage) garde le formulaire
+  // ouvert, erreur affichée inline, jamais une fermeture silencieuse qui ferait croire le
+  // partage enregistré. `file` = objet File réel transmis tel quel par AddShareSheet.jsx
+  // (`undefined`/`null` pour un partage 'lien'/'info', ou en modification sans remplacement).
+  async function handleCreateShare(payload, file) {
+    if (!communityId || !currentUserId) {
+      return { ok: false, error: 'Session invalide — reconnecte-toi.' };
     }
-    const next = [{
-      id: 'sh-' + Date.now(),
-      type: payload.type,
-      title: payload.title,
-      description: payload.description,
-      author: ME,
-      // Bug corrigé (contre-vérification indépendante, spécifique à La Réunion) : voir
-      // src/localDate.js — .toISOString() renvoyait la date UTC, pas la date locale.
-      date: localIso(),
-      fileName: payload.fileName,
-      fileSize: payload.fileSize,
-      // Item 11 : data: URL réelle (FileReader, AddShareSheet.jsx) quand un fichier/une photo a
-      // réellement été importé(e) — undefined sinon (ex. type 'lien'/'info'), jamais une chaîne
-      // vide trompeuse qui laisserait croire à un fichier sans contenu.
-      fileDataUrl: payload.fileDataUrl,
-      photoDataUrl: payload.photoDataUrl,
-      photoCount: payload.photoCount,
-      linkUrl: payload.linkUrl,
-      domain: payload.domain,
-      linkedEventId: payload.linkedEventId,
-    }, ...shares];
-    return persistShares(next);
+    try {
+      if (payload.id) {
+        const previous = shares.find((s) => s.id === payload.id);
+        await sharesApi.updateShare(payload.id, communityId, currentUserId, payload, file, previous?.filePath || null);
+      } else {
+        await sharesApi.createShare(communityId, currentUserId, payload, file);
+      }
+    } catch (err) {
+      return { ok: false, error: "Le partage n'a pas pu être enregistré — réessaie." };
+    }
+    try {
+      // Même raisonnement que sendMessage (P1, ordonnanceur partagé 'shares') — voir le
+      // commentaire équivalent sur ce bloc pour Messages, non redupliqué ici.
+      await reloadSchedulerRef.current.requestAndWait('shares', loadShares);
+    } catch (reloadErr) {
+      // Le partage a bien été enregistré ci-dessus (persisté côté serveur) — seul le
+      // rechargement qui devait le faire apparaître a échoué. L'erreur honnête est déjà
+      // affichée par loadShares lui-même (setSharesError) avant son rejet.
+      console.warn('[ABCZed] Rechargement des partages après création/modification : échec (best-effort, non bloquant)', reloadErr);
+    }
+    return { ok: true };
   }
 
-  function handleDeleteShare(id) {
-    const next = shares.filter((s) => s.id !== id);
-    persistShares(next);
+  async function handleDeleteShare(id) {
+    const target = shares.find((s) => s.id === id);
+    try {
+      await sharesApi.deleteShare(id, target?.filePath || null);
+    } catch (err) {
+      setSharesError("La suppression du partage a échoué — réessaie.");
+      return;
+    }
+    try {
+      await reloadSchedulerRef.current.requestAndWait('shares', loadShares);
+    } catch (reloadErr) {
+      console.warn('[ABCZed] Rechargement des partages après suppression : échec (best-effort, non bloquant)', reloadErr);
+    }
   }
 
   // Repli explicite : un tag ouvert depuis Messages/Partages (encore factices, ids type
@@ -1377,26 +1421,11 @@ export default function App({ activeCommunity, memberships }) {
           </div>
         )}
 
-        {/* Correction post-livraison (contre-vérification indépendante) : ce bandeau signale un
-            état FONCTIONNEL réel (Partages tourne encore sur des données locales identiques
-            pour toutes les communautés), pas un artefact de développement — il ne doit donc
-            jamais dépendre du mode build (DEMO_MODE/import.meta.env.DEV), sans quoi un build
-            `npm run build` déployé tel quel afficherait silencieusement de fausses données sans
-            aucun avertissement. Seule condition : l'état réel des données.
-            V7.7 : "Messages," retiré du texte — ce module est maintenant réellement branché à
-            Supabase (MESSAGES_FROM_SUPABASE), le mentionner ici serait désormais trompeur
-            ("Interdiction de livraison trompeuse", brief V7.7).
-            V7.18 : "et La Bande" retiré à son tour — ce module est maintenant branché à
-            Supabase (MEMBERS_FROM_SUPABASE, src/membersApi.js) et affiche l'annuaire réel de la
-            communauté (vide à part son propre profil tant qu'aucun parent n'a rejoint). Seul
-            Partages reste concerné par ce bandeau dans ce lot. */}
-        {!BUSINESS_DATA_FROM_SUPABASE && (
-          <div style={{ margin: '10px 20px 0', background: '#EAF1FB', border: `1px solid ${BLUE}33`, borderRadius: 10, padding: '8px 12px', fontSize: 11.5, color: INK }}>
-            Partages affiche un contenu de démonstration — identique pour toutes les
-            communautés tant qu'il n'est pas encore branché à Supabase. L'Agenda, les Messages
-            et La Bande, eux, affichent déjà les vraies données de ta communauté.
-          </div>
-        )}
+        {/* Bandeau "Partages affiche un contenu de démonstration" retiré le 23 septembre
+            (backlog point 4) — ce module est désormais branché à Supabase (SHARES_FROM_SUPABASE,
+            src/sharesApi.js) comme les quatre autres avant lui (Agenda/Messages/La Bande) ; le
+            garder aurait été trompeur ("Interdiction de livraison trompeuse", même règle que les
+            retraits précédents de ce même bandeau en V7.7/V7.18, visibles dans l'historique). */}
         {AGENDA_FROM_SUPABASE && dataError && (
           <div style={{ margin: '10px 20px 0', background: `${RED}14`, border: `1px solid ${RED}55`, borderRadius: 10, padding: '8px 12px', fontSize: 11.5, color: RED }}>
             {dataError}
@@ -1544,7 +1573,10 @@ export default function App({ activeCommunity, memberships }) {
             {view === 'partages' && (
               <Partages
                 shares={shares}
-                events={MOCK_EVENTS}
+                // Backlog point 4 : événements RÉELS de l'agenda Supabase (comme Messages
+                // reçoit déjà `events` ci-dessus) — jamais MOCK_EVENTS, qui ne contient aucun
+                // des événements qu'un partage réel peut désormais référencer.
+                events={events}
                 onDelete={handleDeleteShare}
                 onEdit={(s) => { setEditingShare(s); setShowAddShare(true); }}
                 onAdd={() => setShowAddShare(true)}
@@ -1559,6 +1591,10 @@ export default function App({ activeCommunity, memberships }) {
                 onBackToAccueil={() => setView('accueil')}
                 restoreState={navMemory.partages}
                 onRestoreConsumed={() => consumeNav('partages')}
+                currentUserId={currentUserId}
+                isAdmin={isAdmin}
+                sharesLoading={sharesLoading}
+                sharesError={sharesError}
               />
             )}
             {view === 'labande' && (
@@ -1615,6 +1651,7 @@ export default function App({ activeCommunity, memberships }) {
             editingShare={editingShare}
             onClose={() => { setShowAddShare(false); setEditingShare(null); }}
             onCreate={handleCreateShare}
+            events={events}
           />
         )}
 
