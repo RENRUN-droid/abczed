@@ -173,7 +173,12 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
             return (
               <button
                 key={t.key}
-                onClick={() => { setType(t.key); setErrors({}); }}
+                // Correctif recette (23 sept.) : l'erreur d'un envoi précédent (`submitError`)
+                // restait affichée en changeant de type, laissant croire à tort qu'un NOUVEL
+                // essai avait déjà échoué avant même d'avoir été tenté — `errors` (erreurs de
+                // champ) était déjà effacé ici, `submitError` (erreur d'enregistrement globale)
+                // ne l'était pas.
+                onClick={() => { setType(t.key); setErrors({}); setSubmitError(''); }}
                 aria-pressed={active}
                 style={{
                   flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
