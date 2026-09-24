@@ -41,6 +41,12 @@ export function mapMemberRow(row, currentUserId) {
     // profil" déjà en place dans App.jsx (openMember) sans y toucher — ce module est le SEUL
     // endroit qui décide "est-ce moi ?", à partir du vrai user_id (jamais deviné ailleurs).
     id: row.user_id === currentUserId ? 'mem-vous' : row.id,
+    // V7.33 (25 sept.) — le vrai UUID `members.id` était jusqu'ici PERDU pour soi-même (remplacé
+    // ci-dessus par la sentinelle 'mem-vous'), alors que c'est précisément ce que
+    // `member_children.member_id` exige pour qu'on puisse ajouter/retirer SES PROPRES enfants
+    // (MyProfileSheet.jsx, src/childrenApi.js) — conservé ici sans toucher à `id`, pour ne
+    // JAMAIS casser le court-circuit existant partout ailleurs dans l'app.
+    rawId: row.id,
     userId: row.user_id,
     role: row.role,
     firstName,
