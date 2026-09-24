@@ -1,5 +1,5 @@
-import { useMemo, useRef } from 'react';
-import { CircleAlert, ChevronRight, Image, FileText, Link2, Info, CalendarDays, CakeSlice, Search, X, CalendarPlus, MessageCircle } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { CircleAlert, ChevronRight, Image, FileText, Link2, Info, CalendarDays, CakeSlice, Search, X, CalendarPlus, MessageCircle, Pencil } from 'lucide-react';
 import { BLUE, RED, INK, MUTED, CARD_BORDER, CATEGORIES, SECTION_THEMES, categoryOf, FONT_DISPLAY } from '../theme';
 import { anyFieldMatches } from '../searchUtils';
 import { nextOccurrence, isUpcomingEvent } from '../agendaSearch';
@@ -14,8 +14,10 @@ import { sortMessagesChronologically } from '../messageSearch';
 // signalé par contre-vérification indépendante : cet écran affichait "Aujourd'hui à HH:MM"
 // pour CHAQUE dernier message, même quand sa vraie date était hier ou plus ancienne.
 import { dateSeparatorLabel } from '../dateLabels.js';
+import { localIso } from '../localDate.js';
 import PageTitle from '../components/PageTitle';
 import Button from '../components/Button';
+import EditBilletSheet from '../components/EditBilletSheet';
 
 // Brief §9 : une information importante ne mène qu'à son propre contenu réellement lié —
 // jamais à "le prochain événement, peu importe lequel". "Rentrée décalée à 8h45 vendredi"
@@ -45,8 +47,16 @@ export default function Accueil({
   // messages" affichait "Aucun message pour l'instant." pendant le chargement initial ET en
   // cas d'échec réseau, confondant les trois états (chargement, erreur, fil réellement vide).
   messagesLoading, messagesError,
+  // V7.28 (25 sept.) : "Le p'tit billet" branché à Supabase (sql/10_billet.sql,
+  // src/billetApi.js) — `billet` est `null` tant qu'aucun billet n'a jamais été publié pour
+  // cette communauté (état géré explicitement ci-dessous, jamais confondu avec le chargement).
+  // `isAdmin` déjà calculé dans App.jsx (ligne ~73, `activeCommunity?.role === 'admin'`),
+  // simplement jamais transmis ici jusqu'à ce lot — seul un administrateur voit le bouton
+  // d'édition, même principe que "Inviter un parent" dans La Bande.
+  billet, billetLoading, billetError, isAdmin, onSaveBillet,
 }) {
   const searchInputRef = useRef(null);
+  const [showEditBillet, setShowEditBillet] = useState(false);
 
   // Delta §2.2/§26 + lot consolidé UX/navigation (point 8) : la recherche Accueil est
   // désormais levée dans App.jsx (comme les 4 autres pages) — la recette manuelle a montré
@@ -250,18 +260,58 @@ export default function Accueil({
             </Button>
           </div>
 
-          {/* Le p'tit billet */}
-          <div style={{ background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderLeft: `4px solid ${RED}`, borderRadius: 18, padding: 16, marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontWeight: 700, color: RED, fontSize: 15 }}>Le p'tit billet</span>
-              <span style={{ fontSize: 11, opacity: 0.5 }}>aujourd'hui</span>
+          {/* Le p'tit billet — V7.28 (25 sept.) : n'affiche plus jamais de texte de
+              démonstration codé en dur (voir dataSourceFlags.js, BILLET_FROM_SUPABASE). Trois
+              états distincts, jamais confondus (même principe que membersLoading/messagesError
+              ailleurs dans ce projet) : chargement initial, erreur réseau réelle, et "aucun
+              billet publié pour l'instant" (`billet === null`, état normal tant que
+              l'administrateur n'a encore rien publié — pas une erreur). */}
+          {!billetLoading && !billetError && (
+            <div style={{ background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderLeft: `4px solid ${RED}`, borderRadius: 18, padding: 16, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontWeight: 700, color: RED, fontSize: 15 }}>Le p'tit billet</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {billet && (
+                    <span style={{ fontSize: 11, opacity: 0.5 }}>
+                      {dateSeparatorLabel(localIso(new Date(billet.updatedAt)))}
+                    </span>
+                  )}
+                  {isAdmin && (
+                    <button
+                      onClick={() => setShowEditBillet(true)}
+                      aria-label="Modifier le p'tit billet"
+                      className="tap-surface icon-button"
+                      style={{ background: 'none', border: 'none', borderRadius: 10, padding: 2 }}
+                    >
+                      <Pencil size={15} color={MUTED} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {billet ? (
+                <p style={{ fontSize: 16, lineHeight: 1.45, margin: '8px 0 0', color: INK, whiteSpace: 'pre-line' }}>
+                  {billet.content}
+                </p>
+              ) : (
+                <p style={{ fontSize: 13.5, lineHeight: 1.45, margin: '8px 0 0', color: MUTED }}>
+                  {isAdmin ? "Aucun billet publié pour l'instant — touchez le crayon pour écrire le premier." : "Aucun billet publié pour l'instant."}
+                </p>
+              )}
             </div>
-            <p style={{ fontSize: 16, lineHeight: 1.45, margin: '8px 0 0', color: INK }}>
-              Bienvenue sur ABCZed ! Ici, on simplifie la vie de la bande : sorties, infos utiles,
-              messages, photos et contacts réunis au même endroit. Chacun peut partager, proposer,
-              aider et faire vivre cet espace. Merci d'en prendre soin ensemble ! ❤️
-            </p>
-          </div>
+          )}
+          {billetError && (
+            <div style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '8px 12px', marginBottom: 16, fontSize: 12, color: '#8A2E1F' }}>
+              {billetError}
+            </div>
+          )}
+
+          {showEditBillet && (
+            <EditBilletSheet
+              initialContent={billet?.content || ''}
+              onSave={onSaveBillet}
+              onClose={() => setShowEditBillet(false)}
+            />
+          )}
 
           {/* Informations importantes — titre centré (delta §4.1), pas de CTA (§4.3 : tant
               qu'il n'existe pas de vraie liste/historique dédié, un "Tout voir" serait
