@@ -18,6 +18,7 @@ import { localIso } from '../localDate.js';
 import PageTitle from '../components/PageTitle';
 import Button from '../components/Button';
 import EditBilletSheet from '../components/EditBilletSheet';
+import Avatar from '../components/Avatar';
 
 // V7.29 (25 sept.) — retiré : ce tableau ne contenait qu'une entrée de démonstration codée en
 // dur ("Rentrée décalée à 8h45 vendredi"), jamais reliée à une vraie donnée, et sans aucun
@@ -179,7 +180,7 @@ export default function Accueil({
               <SectionTitle>Messages</SectionTitle>
               {messageResults.map((m) => (
                 <Row key={m.id} onClick={() => onOpenMessage(m.id, `home-search-message-${m.id}`)} id={`home-search-message-${m.id}`}>
-                  <Avatar initials={m.initials} color={m.color} />
+                  <Avatar avatarPath={m.avatarUrl} color={m.color} initials={m.initials} size={34} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13.5 }}><b>{m.author}</b> — {m.text || m.file?.name}</div>
                   </div>
@@ -212,9 +213,8 @@ export default function Accueil({
                 const kids = childrenOf(m);
                 return (
                   <Row key={m.id} onClick={() => onOpenMember(m.id, `home-search-member-${m.id}`)} id={`home-search-member-${m.id}`}>
-                    <div style={{ width: 34, height: 34, borderRadius: '50%', background: m.avatarColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-                      {m.firstName.slice(0, 1)}
-                    </div>
+                    {/* V7.34 — Avatar partagé : vraie photo si mise, sinon même cercle couleur+initiale. */}
+                    <Avatar avatarPath={m.avatarUrl} color={m.avatarColor} initials={m.firstName.slice(0, 1)} size={34} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600 }}>{m.firstName} {m.lastName}</div>
                       {kids.length > 0 && <div style={{ fontSize: 12, opacity: 0.6 }}>{kids.map((c) => `${c.label} de ${c.firstName}`).join(' — ')}</div>}
@@ -389,7 +389,7 @@ export default function Accueil({
             <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Chargement des messages…</p>
           ) : lastMessage ? (
             <Row id="home-lastmessage" onClick={() => onOpenMessage(lastMessage.id, 'home-lastmessage')}>
-              <Avatar initials={lastMessage.initials} color={lastMessage.color} />
+              <Avatar avatarPath={lastMessage.avatarUrl} color={lastMessage.color} initials={lastMessage.initials} size={34} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5 }}><b>{lastMessage.author}</b> — {lastMessage.text}</div>
                 {/* V7.8 (correctif) : étiquette calculée à partir de la vraie date du message
@@ -463,13 +463,6 @@ function Row({ children, onClick, icon, noChevron, id }) {
       {children}
       {!noChevron && <ChevronRight size={16} color={MUTED} style={{ marginLeft: 'auto', flexShrink: 0 }} />}
     </button>
-  );
-}
-function Avatar({ initials, color }) {
-  return (
-    <div style={{ width: 34, height: 34, borderRadius: '50%', background: color, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
-      {initials}
-    </div>
   );
 }
 function ShareTile({ icon, label, onClick, id }) {
