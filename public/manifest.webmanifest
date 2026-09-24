@@ -1,0 +1,17 @@
+{
+  "name": "ABCZed",
+  "short_name": "ABCZed",
+  "description": "ABCZed — agenda, messages et partages pour la bande.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FBF6EC",
+  "theme_color": "#0D47A1",
+  "lang": "fr",
+  "icons": [
+    { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
