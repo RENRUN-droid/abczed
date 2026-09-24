@@ -22,11 +22,11 @@
 import Logo from './Logo';
 import ConnectedAvatar from './ConnectedAvatar';
 
-export default function CompactHeader({ currentUserId, displayName, onOpenProfile }) {
+export default function CompactHeader({ currentUserId, displayName, avatarPath, onOpenProfile }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 20px 0' }}>
       <Logo size={18} />
-      <ConnectedAvatar userId={currentUserId} displayName={displayName} size={22} onClick={onOpenProfile} />
+      <ConnectedAvatar userId={currentUserId} displayName={displayName} avatarPath={avatarPath} size={22} onClick={onOpenProfile} />
     </div>
   );
 }
