@@ -43,3 +43,13 @@ export const MEMBERS_FROM_SUPABASE = true;
 // supplémentaire nécessaire. Dernier des cinq modules métier (Agenda/Messages/La Bande/Partages,
 // plus l'authentification elle-même) à quitter les données de démonstration locales.
 export const SHARES_FROM_SUPABASE = true;
+
+// V7.28 (25 sept.) — pilote "Le p'tit billet" (encart d'accueil), via le module dédié
+// src/billetApi.js et la table `billet` (sql/10_billet.sql). Avant ce lot, ce texte était codé
+// en dur dans Accueil.jsx depuis l'origine du projet (texte de démonstration, jamais relié à
+// aucune donnée réelle) — demande explicite de l'utilisatrice : un billet qu'elle peut
+// remettre à jour elle-même depuis l'application, sans jamais repasser par une livraison de
+// code. Une seule ligne par communauté (`community_id` est la clé primaire de `billet`) :
+// chaque mise à jour REMPLACE le billet courant, pas d'historique — "quelque chose qui passe
+// et laisse sa place", formulation exacte de l'utilisatrice.
+export const BILLET_FROM_SUPABASE = true;
