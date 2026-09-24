@@ -93,6 +93,25 @@ export default function InviteAccept({ token }) {
     setPhase(sameEmail ? 'ready-signed-in' : 'wrong-account');
   }, [session, phase, invitation]);
 
+  // V7.31 (25 sept.) — conséquence directe du correctif `emailRedirectTo` (voir handleSignUp
+  // ci-dessous / signUp() dans AuthProvider.jsx) : le lien de confirmation reçu par e-mail peut
+  // désormais ramener ICI-MÊME, dans un contexte de navigateur tout neuf (celui qui a ouvert le
+  // lien) où AUCUNE inscription n'a jamais été commencée dans ce composant. Au premier rendu,
+  // l'effet initial (fetchInvitationPreview, tout en haut) évalue `session` AVANT que le SDK
+  // Supabase ait fini d'échanger le jeton présent dans l'URL — donc `session` y est encore nul,
+  // et la phase retombe sur 'ready-signup' (formulaire de création de compte) alors que la
+  // session arrive en réalité un instant après. Sans cet effet, l'écran resterait bloqué sur ce
+  // formulaire malgré une session déjà active et confirmée — même symptôme, dans ce composant
+  // cette fois, que le bug qui envoyait auparavant vers "Accès indisponible" (AccessUnavailable.jsx).
+  // Même garde que les deux effets ci-dessus (restreint à UNE phase précise) pour ne jamais
+  // réagir à un `session` qui changerait pour une autre raison pendant qu'un écran déjà stable
+  // (ex. 'success') est affiché.
+  useEffect(() => {
+    if (phase !== 'ready-signup' || !session || !invitation) return;
+    const sameEmail = (session.user.email || '').toLowerCase() === invitation.email.toLowerCase();
+    setPhase(sameEmail ? 'ready-signed-in' : 'wrong-account');
+  }, [session, phase, invitation]);
+
   async function finishAcceptance(name) {
     try {
       const result = await acceptInvitation(token, name);
@@ -110,7 +129,10 @@ export default function InviteAccept({ token }) {
     if (submitting || !displayName.trim() || !password) return;
     setSubmitting(true);
     setError('');
-    const result = await signUp(invitation.email, password);
+    // V7.31 — voir le commentaire détaillé sur signUp() (AuthProvider.jsx) : sans ça, le lien de
+    // confirmation reçu par e-mail ramène vers la racine du site plutôt que sur CETTE invitation
+    // précise, quel que soit l'endroit où il est ouvert (souvent différent de cet onglet-ci).
+    const result = await signUp(invitation.email, password, `${window.location.origin}/invite/${token}`);
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error === 'not-configured' ? "L'application n'est pas configurée." : result.error);
