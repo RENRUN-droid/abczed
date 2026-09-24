@@ -58,7 +58,8 @@ import { createReloadScheduler } from './reloadScheduler';
 // circulaire avec App.jsx (qui importe lui-même Messages.jsx comme composant de page). Mêmes
 // valeurs, mêmes commentaires qu'avant ce déplacement — voir ce module pour le détail de
 // l'arbitrage derrière chaque drapeau.
-import { AGENDA_FROM_SUPABASE, MESSAGES_FROM_SUPABASE, MEMBERS_FROM_SUPABASE, SHARES_FROM_SUPABASE } from './dataSourceFlags';
+import { AGENDA_FROM_SUPABASE, MESSAGES_FROM_SUPABASE, MEMBERS_FROM_SUPABASE, SHARES_FROM_SUPABASE, BILLET_FROM_SUPABASE } from './dataSourceFlags';
+import * as billetApi from './billetApi';
 
 // memberships est reçu mais pas encore utilisé dans ce bloc — disponible pour la
 // prochaine phase (migration des écrans métier), pas juste accessible "par accident"
@@ -122,6 +123,14 @@ export default function App({ activeCommunity, memberships }) {
   const [shares, setShares] = useState([]);
   const [sharesLoading, setSharesLoading] = useState(SHARES_FROM_SUPABASE);
   const [sharesError, setSharesError] = useState('');
+  // V7.28 (25 sept.) — "Le p'tit billet" branché à Supabase, même principe que `shares`
+  // ci-dessus : `billet` reste `null` (jamais `undefined`) tant qu'aucune ligne n'existe encore
+  // pour cette communauté (billetApi.fetchBillet renvoie explicitement `null` dans ce cas) —
+  // état normal avant toute première publication, distinct de billetLoading/billetError
+  // (Accueil.jsx ne confond jamais les trois).
+  const [billet, setBillet] = useState(null);
+  const [billetLoading, setBilletLoading] = useState(BILLET_FROM_SUPABASE);
+  const [billetError, setBilletError] = useState('');
   const [rsvpBusy, setRsvpBusy] = useState(false);
   // V7.11 (P1) — un seul ordonnanceur partagé pour toute la session (App.jsx ne se démonte
   // jamais), par domaine ('messages' couvre messages+réactions, 'agenda' couvre
@@ -447,6 +456,56 @@ export default function App({ activeCommunity, memberships }) {
     });
     return unsubscribe;
   }, [communityId, loadShares]);
+
+  // ---------------------------------------------------------------------------------------
+  // V7.28 (25 sept.) — "Le p'tit billet". Même méthode exacte que Messages/Partages ci-dessus
+  // (identifiant de requête incrémenté, réinitialisation au changement de communauté,
+  // ordonnanceur partagé 'billet', Realtime avec rechargement complet) — voir les commentaires
+  // détaillés du bloc Messages pour le raisonnement complet derrière chaque choix.
+  // ---------------------------------------------------------------------------------------
+  const billetRequestId = useRef(0);
+  const loadBillet = useCallback(async () => {
+    if (!BILLET_FROM_SUPABASE || !communityId) return;
+    const myRequestId = ++billetRequestId.current;
+    setBilletError('');
+    try {
+      const row = await billetApi.fetchBillet(communityId);
+      if (myRequestId !== billetRequestId.current) return; // réponse obsolète, ignorée
+      setBillet(row);
+    } catch (err) {
+      if (myRequestId !== billetRequestId.current) return;
+      setBilletError('Impossible de charger le billet — vérifie ta connexion et réessaie.');
+      throw err;
+    } finally {
+      if (myRequestId === billetRequestId.current) setBilletLoading(false);
+    }
+  }, [communityId]);
+
+  useEffect(() => {
+    if (!BILLET_FROM_SUPABASE) return;
+    setBillet(null);
+    setBilletLoading(true);
+    setBilletError('');
+    reloadSchedulerRef.current.reset('billet');
+    loadBillet().catch(() => {});
+  }, [communityId, loadBillet]);
+
+  useEffect(() => {
+    if (!BILLET_FROM_SUPABASE || !communityId) return;
+    const unsubscribe = billetApi.subscribeToBillet(communityId, () => {
+      reloadSchedulerRef.current.request('billet', loadBillet).catch(() => {});
+    });
+    return unsubscribe;
+  }, [communityId, loadBillet]);
+
+  // Admin uniquement (EditBilletSheet.jsx n'est même rendu que pour lui, côté Accueil.jsx) —
+  // recharge explicitement après écriture (`requestAndWait`), même principe que
+  // handleSaveShare/handleSaveMessage : l'auteur de l'action voit le résultat immédiatement,
+  // sans attendre l'écho Realtime (qui rafraîchira aussi les autres appareils/onglets ouverts).
+  async function handleSaveBillet(content) {
+    await billetApi.upsertBillet(communityId, content);
+    await reloadSchedulerRef.current.requestAndWait('billet', loadBillet);
+  }
 
   // P1 (exercice de correction V7.5) : `view`/`selectedEventId`/`eventReturnTo` vivaient
   // uniquement dans cet état React — une actualisation du navigateur perdait tout et renvoyait
@@ -1445,6 +1504,11 @@ export default function App({ activeCommunity, memberships }) {
                 members={members}
                 messagesLoading={messagesLoading}
                 messagesError={messagesError}
+                billet={billet}
+                billetLoading={billetLoading}
+                billetError={billetError}
+                isAdmin={isAdmin}
+                onSaveBillet={handleSaveBillet}
                 onOpenEvent={(id, focusId) => openEvent(id, 'accueil', focusId)}
                 onOpenMessage={(id, focusId) => enterSection('messages', 'accueil', { highlightId: id, focusId })}
                 onOpenShare={(id, focusId) => enterSection('partages', 'accueil', { highlightId: id, focusId })}
