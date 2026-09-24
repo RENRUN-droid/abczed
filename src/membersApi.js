@@ -16,3 +16,26 @@ export async function fetchCommunityMembers(communityId, currentUserId) {
   if (error) throw error;
   return mapMemberRows(rows || [], currentUserId);
 }
+
+// V7.30 (25 sept.) — "Retirer un membre" (admin). Le champ `status` existe depuis l'origine du
+// schéma (sql/01_schema_and_helpers.sql, contrainte 'invited'|'active'|'removed') et TOUT le
+// reste du système en dépend déjà : app_private.is_community_member()/is_community_admin() ne
+// considèrent que status='active', donc un membre passé à 'removed' perd instantanément l'accès
+// à toute la communauté (messages, partages, agenda, billet) — sans rien à changer ailleurs.
+// fetchCommunityMembers() ci-dessus filtre déjà `.eq('status', 'active')`, donc un membre
+// retiré disparaît aussi immédiatement de La Bande pour tout le monde, admin compris.
+// Suppression volontairement PAS utilisée (delete) : `grant` sur `members` n'autorise que
+// select/update au client (sql/02_rls.sql) — le retrait est une désactivation, jamais un vrai
+// DELETE, pour ne jamais casser un ancien message/partage qui référence cette personne comme
+// auteur (messages.author_id/shares.author_id pointent vers auth.users, jamais vers members).
+// Droit déjà vérifié : policy "update_own_display_fields_or_admin" (sql/02_rls.sql) autorise un
+// admin à modifier n'importe quelle ligne membre de SA communauté ; le trigger
+// protect_sensitive_member_columns (sql/01_schema_and_helpers.sql) réserve déjà le changement
+// de `status` aux seuls admins — aucune nouvelle règle SQL nécessaire pour cette fonctionnalité.
+export async function removeMember(memberId) {
+  const { error } = await supabase
+    .from('members')
+    .update({ status: 'removed' })
+    .eq('id', memberId);
+  if (error) throw error;
+}
