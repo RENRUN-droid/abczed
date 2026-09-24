@@ -112,9 +112,25 @@ export function AuthProvider({ children }) {
   // ou non ; c'est `data.session` (présente ou non dans la réponse) qui le révèle après coup,
   // jamais deviné à l'avance ici. L'appelant (InviteAccept.jsx) décide quoi afficher selon ce
   // que cette fonction renvoie, pas cette fonction elle-même.
-  async function signUp(email, password) {
+  //
+  // V7.31 (25 sept.) — bug réel constaté en test réel (première invitée hors compte de test) :
+  // sans `emailRedirectTo` explicite, Supabase renvoie le lien de confirmation vers l'URL "Site
+  // URL" générique du projet — jamais /invite/<token>. Peu grave si le lien est ouvert dans le
+  // MÊME onglet que celui resté sur "Vérifie ta boîte mail" (l'effet dédié d'InviteAccept.jsx,
+  // qui observe `session`, termine alors l'adhésion tout seul) — mais quiconque confirme depuis
+  // un e-mail ouvert ailleurs (appli Mail, autre onglet, autre appareil — le cas de très loin le
+  // plus fréquent en usage réel) atterrit authentifié mais SANS AUCUNE communauté, sur
+  // AccessUnavailable.jsx ("Accès indisponible"), sans aucun moyen d'en sortir sinon se
+  // déconnecter. `redirectTo` optionnel : InviteAccept.jsx le fournit désormais
+  // (`/invite/<token>`, voir plus bas) ; tout AUTRE appelant de signUp() (aucun à ce jour, mais
+  // ne jamais supposer qu'InviteAccept.jsx restera le seul) retombe sur l'ancien comportement
+  // (racine du site) si l'argument est omis — jamais une regression silencieuse.
+  async function signUp(email, password, redirectTo) {
     if (!isSupabaseConfigured) return { ok: false, error: 'not-configured' };
-    const { data, error: err } = await supabase.auth.signUp({ email, password });
+    const { data, error: err } = await supabase.auth.signUp({
+      email, password,
+      ...(redirectTo ? { options: { emailRedirectTo: redirectTo } } : {}),
+    });
     if (err) return { ok: false, error: err.message };
     // `data.session` non nul = confirmation d'e-mail désactivée sur ce projet : le compte est
     // déjà authentifié, onAuthStateChange (ci-dessus) va lever loadMemberships tout seul.
