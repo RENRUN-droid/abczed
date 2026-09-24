@@ -231,7 +231,13 @@ export default function Partages({
                     )}
                   </div>
 
-                  {s.description && <p style={{ fontSize: 14, color: INK, opacity: 0.85, margin: '4px 0 0', lineHeight: 1.4 }}>{s.description}</p>}
+                  {/* Billet de bienvenue (25 sept.) : une description avec plusieurs paragraphes
+                      (retours à la ligne saisis par l'utilisatrice) s'affichait comme un seul bloc
+                      compact — le HTML normal fusionne les retours à la ligne d'une chaîne de
+                      caractères. `pre-line` les respecte (paragraphe par paragraphe) tout en
+                      absorbant les espaces superflus d'un copier-coller, sans figer les espaces
+                      multiples comme `pre-wrap` l'aurait fait. */}
+                  {s.description && <p style={{ fontSize: 14, color: INK, opacity: 0.85, margin: '4px 0 0', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{s.description}</p>}
 
                   {/* Delta pts 29/30/39/42 (arbitrage D1) : nom/taille résolus depuis le
                       catalogue src/documents.js quand ce partage y référence un fichier réel
