@@ -14,10 +14,16 @@
 // dimensions que l'avatar chargé (`size`), fond gris neutre cohérent avec le thème existant,
 // icône Lucide `UserRound`, libellé accessible "Profil non chargé" (texte EXACT demandé par le
 // brief).
+//
+// V7.34 — `avatarPath` (nouveau prop optionnel) : chemin de la vraie photo dans le bucket privé
+// `avatars` (AuthProvider.jsx, `activeCommunity.avatar_url`), délégué au composant partagé
+// `Avatar` (résolution d'URL signée + repli couleur/initiale identique à avant si absent) —
+// jamais dupliqué ici.
 import { UserRound } from 'lucide-react';
 import { avatarColorFor, initialsOf } from '../avatarColor';
+import Avatar from './Avatar';
 
-export default function ConnectedAvatar({ userId, displayName, size = 30, onClick, className, style }) {
+export default function ConnectedAvatar({ userId, displayName, avatarPath, size = 30, onClick, className, style }) {
   const hasProfile = Boolean((displayName || '').trim());
   const base = {
     width: Math.max(44, size),
@@ -64,9 +70,7 @@ export default function ConnectedAvatar({ userId, displayName, size = 30, onClic
       className={classes}
       style={base}
     >
-      <span style={{ ...circle, background: avatarColorFor(userId), color: '#fff', fontSize: Math.max(10, Math.round(size * 0.42)), fontWeight: 700 }}>
-        {initialsOf(displayName)}
-      </span>
+      <Avatar avatarPath={avatarPath} color={avatarColorFor(userId)} initials={initialsOf(displayName)} size={size} />
     </button>
   );
 }
