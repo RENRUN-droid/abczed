@@ -19,15 +19,16 @@ import PageTitle from '../components/PageTitle';
 import Button from '../components/Button';
 import EditBilletSheet from '../components/EditBilletSheet';
 
-// Brief §9 : une information importante ne mène qu'à son propre contenu réellement lié —
-// jamais à "le prochain événement, peu importe lequel". "Rentrée décalée à 8h45 vendredi"
-// correspond à l'événement École réel 'evt-rentree' (voir data.js) : c'est CE lien précis,
-// pas nextEvent, qui doit s'ouvrir. Si l'événement lié n'existe pas dans les données reçues
-// (ex. pas encore migré côté Supabase), le chevron disparaît et la ligne devient non cliquable
-// plutôt que de mentir sur une destination inexistante.
-const IMPORTANT_INFOS = [
-  { id: 'info-rentree', text: 'Rentrée décalée à 8h45 vendredi.', linkedEventId: 'evt-rentree' },
-];
+// V7.29 (25 sept.) — retiré : ce tableau ne contenait qu'une entrée de démonstration codée en
+// dur ("Rentrée décalée à 8h45 vendredi"), jamais reliée à une vraie donnée, et sans aucun
+// moyen (même pour l'admin) d'en ajouter une vraie. Signalé par l'utilisatrice juste avant un
+// partage réel de l'appli — retiré pour ne plus jamais l'afficher, en attendant une vraie
+// fonctionnalité "Informations importantes" éditable (même principe que "Le p'tit billet",
+// sql/10_billet.sql), pas encore construite. La section entière "Informations importantes"
+// (titre + contenu) ne s'affiche plus tant que ce tableau est vide — voir plus bas, même
+// principe que "Prochain événement"/l'anniversaire, qui disparaissent déjà tous deux quand ils
+// n'ont rien à montrer.
+const IMPORTANT_INFOS = [];
 
 const SHARE_ICONS = { document: FileText, photo: Image, lien: Link2, info: Info };
 
@@ -315,25 +316,31 @@ export default function Accueil({
 
           {/* Informations importantes — titre centré (delta §4.1), pas de CTA (§4.3 : tant
               qu'il n'existe pas de vraie liste/historique dédié, un "Tout voir" serait
-              artificiel). */}
-          <SectionTitle>Informations importantes</SectionTitle>
-          {IMPORTANT_INFOS.map((info) => {
-            // Cherche d'abord dans les vraies données Agenda, puis dans les événements de
-            // démonstration (mêmes ids que 'evt-rentree') — même repli que App.jsx pour
-            // selectedEvent, pour rester cohérent tant que les données ne sont pas unifiées.
-            const target = events.find((e) => e.id === info.linkedEventId);
-            return (
-              <Row
-                key={info.id}
-                id={`home-info-${info.id}`}
-                icon={<CircleAlert size={18} color={RED} />}
-                onClick={target ? () => onOpenEvent(target.id, `home-info-${info.id}`) : undefined}
-                noChevron={!target}
-              >
-                <span style={{ fontSize: 13.5 }}>{info.text}</span>
-              </Row>
-            );
-          })}
+              artificiel). V7.29 : IMPORTANT_INFOS est vide (voir plus haut) — toute la section
+              disparaît tant qu'il n'y a rien de réel à montrer, même principe que "Prochain
+              événement"/l'anniversaire ci-dessous. */}
+          {IMPORTANT_INFOS.length > 0 && (
+            <>
+              <SectionTitle>Informations importantes</SectionTitle>
+              {IMPORTANT_INFOS.map((info) => {
+                // Cherche d'abord dans les vraies données Agenda, puis dans les événements de
+                // démonstration (mêmes ids que 'evt-rentree') — même repli que App.jsx pour
+                // selectedEvent, pour rester cohérent tant que les données ne sont pas unifiées.
+                const target = events.find((e) => e.id === info.linkedEventId);
+                return (
+                  <Row
+                    key={info.id}
+                    id={`home-info-${info.id}`}
+                    icon={<CircleAlert size={18} color={RED} />}
+                    onClick={target ? () => onOpenEvent(target.id, `home-info-${info.id}`) : undefined}
+                    noChevron={!target}
+                  >
+                    <span style={{ fontSize: 13.5 }}>{info.text}</span>
+                  </Row>
+                );
+              })}
+            </>
+          )}
 
           {/* Prochain événement — titre centré (§4.1), pas de CTA (§4.3 : l'Agenda existe déjà
               comme destination complète). */}
@@ -379,7 +386,7 @@ export default function Accueil({
               {messagesError}
             </div>
           ) : messagesLoading ? (
-            <p style={{ fontSize: 13, opacity: 0.5 }}>Chargement des messages…</p>
+            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Chargement des messages…</p>
           ) : lastMessage ? (
             <Row id="home-lastmessage" onClick={() => onOpenMessage(lastMessage.id, 'home-lastmessage')}>
               <Avatar initials={lastMessage.initials} color={lastMessage.color} />
@@ -392,7 +399,7 @@ export default function Accueil({
               </div>
             </Row>
           ) : (
-            <p style={{ fontSize: 13, opacity: 0.5 }}>Aucun message pour l'instant.</p>
+            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Aucun message pour l'instant.</p>
           )}
           <SectionCTA id="home-viewall-messages" onClick={onViewAllMessages}>Voir tous les messages</SectionCTA>
 
