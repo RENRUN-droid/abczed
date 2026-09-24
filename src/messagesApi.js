@@ -40,14 +40,18 @@ export async function fetchMessages(communityId) {
   const reactorIds = reactionRows.map((r) => r.user_id);
   const allUserIds = [...new Set([...authorIds, ...reactorIds])];
   let namesByUserId = {};
+  let avatarUrlByUserId = {};
   if (allUserIds.length > 0) {
     const { data: members, error: membersErr } = await supabase
       .from('members')
-      .select('user_id, display_name')
+      .select('user_id, display_name, avatar_url')
       .eq('community_id', communityId)
       .in('user_id', allUserIds);
     if (membersErr) throw membersErr;
     namesByUserId = Object.fromEntries(members.map((m) => [m.user_id, m.display_name]));
+    // V7.34 — même lecture, un champ de plus : chemin de la photo (bucket privé `avatars`),
+    // résolu en URL signée seulement à l'affichage (voir src/avatarApi.js/Avatar.jsx), jamais ici.
+    avatarUrlByUserId = Object.fromEntries(members.map((m) => [m.user_id, m.avatar_url || null]));
   }
   // Repli défensif volontaire (même garde-fou que agendaApi.js) : jamais de fragment d'UUID,
   // jamais d'email, jamais de donnée issue de auth.users — uniquement members.display_name ou
@@ -82,6 +86,7 @@ export async function fetchMessages(communityId) {
       author: displayName,
       initials: initialsOf(displayName),
       color: avatarColorFor(m.author_id),
+      avatarUrl: avatarUrlByUserId[m.author_id] || null,
       text: m.text,
       date: localIso(created),
       time: created.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
