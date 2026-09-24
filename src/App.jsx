@@ -336,6 +336,16 @@ export default function App({ activeCommunity, memberships }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
+  // V7.30 (25 sept.) — "Retirer un membre" (admin, depuis MemberDetail.jsx). Pas de
+  // reloadSchedulerRef ici : La Bande n'utilise déjà pas ce mécanisme (voir loadMembers
+  // ci-dessus, même simplicité), un rechargement direct après écriture suffit — le membre
+  // retiré disparaît de `members` dès cette réponse (fetchCommunityMembers filtre déjà
+  // `status = 'active'`, voir membersApi.js).
+  async function handleRemoveMember(memberId) {
+    await membersApi.removeMember(memberId);
+    await loadMembers();
+  }
+
   // ---------------------------------------------------------------------------------------
   // V7.7 — Messages (P1/P2/P6). Même méthode défensive que loadMemberships (AuthProvider.jsx) :
   // un identifiant de requête incrémenté à chaque appel, comparé après l'attente réseau, pour
@@ -1675,7 +1685,15 @@ export default function App({ activeCommunity, memberships }) {
                 communityId={communityId}
               />
             )}
-            {view === 'member-detail' && <MemberDetail members={members} memberId={selectedMemberId} onBack={() => setView(memberReturnTo)} />}
+            {view === 'member-detail' && (
+              <MemberDetail
+                members={members}
+                memberId={selectedMemberId}
+                onBack={() => setView(memberReturnTo)}
+                isAdmin={isAdmin}
+                onRemoveMember={handleRemoveMember}
+              />
+            )}
           </>
         )}
 
