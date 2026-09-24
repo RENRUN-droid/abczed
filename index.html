@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
   <meta name="theme-color" content="#0D47A1" />
   <title>ABCZed</title>
+
+  <!-- PWA — installation sur l'écran d'accueil (Android/Chrome et iOS/Safari). -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="/pwa/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/pwa/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png" />
+  <!-- iOS ignore manifest.webmanifest pour le mode plein écran : ces balises sont la seule
+       façon de l'obtenir sur Safari/iOS (Android s'appuie sur "display": "standalone" ci-dessus). -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="ABCZed" />
   <style>
     /* Fond crème appliqué à la racine, une seule fois — pas écran par écran (contrat visuel §4) */
     html, body, #root {
