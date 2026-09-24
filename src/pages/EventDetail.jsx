@@ -243,7 +243,7 @@ export default function EventDetail({
   // `isLiveEvent`/`isAdmin` dans App.jsx).
   canDeleteEvent, onDeleteEvent, deleteBusy,
   // V7.11 (P1) : en-tête compact (logo + avatar connecté) — voir src/components/CompactHeader.jsx.
-  connectedUserId, connectedDisplayName, onOpenProfile,
+  connectedUserId, connectedDisplayName, connectedAvatarPath, onOpenProfile,
 }) {
   const [editing, setEditing] = useState(false);
   const [draftAdults, setDraftAdults] = useState(1);
@@ -355,7 +355,7 @@ export default function EventDetail({
         réelle, les deux disparaissaient entièrement sur cette fiche. Voir
         src/components/CompactHeader.jsx : le bouton "Retour" juste en dessous (déjà existant)
         complète ce bandeau, jamais dupliqué ici. */}
-    <CompactHeader currentUserId={connectedUserId} displayName={connectedDisplayName} onOpenProfile={onOpenProfile} />
+    <CompactHeader currentUserId={connectedUserId} displayName={connectedDisplayName} avatarPath={connectedAvatarPath} onOpenProfile={onOpenProfile} />
     <div className="page-shell" style={{ paddingTop: 18, '--section-accent': cat.color }}>
       {/* Delta §3 : header de détail à 3 zones — flèche à gauche (largeur fixe), titre
           mathématiquement centré, zone droite symétrique de réserve. Un simple
