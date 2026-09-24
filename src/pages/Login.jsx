@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { BLUE, RED, INK, MUTED, BG, CARD_BORDER, FONT_DISPLAY } from '../theme';
 import Logo from '../components/Logo';
+import PasswordField from '../components/PasswordField';
 
 // V7.19 — "mot de passe oublié" ajouté comme deux phases supplémentaires de CET écran plutôt
 // que comme une page séparée dans Root.jsx : contrairement à ResetPassword.jsx (qui dépend d'un
@@ -147,9 +148,8 @@ export default function Login() {
                 Mot de passe oublié ?
               </button>
             </div>
-            <input
+            <PasswordField
               id="login-password"
-              type="password"
               autoComplete="current-password"
               required
               value={password}
