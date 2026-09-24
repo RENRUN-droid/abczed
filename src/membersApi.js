@@ -10,7 +10,7 @@ import { mapMemberRows } from './memberDirectory.js';
 export async function fetchCommunityMembers(communityId, currentUserId) {
   const { data: rows, error } = await supabase
     .from('members')
-    .select('id, user_id, display_name, role, member_children(label, children(id, first_name, group_label))')
+    .select('id, user_id, display_name, role, avatar_url, member_children(label, children(id, first_name, group_label))')
     .eq('community_id', communityId)
     .eq('status', 'active');
   if (error) throw error;
