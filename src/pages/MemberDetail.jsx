@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { ArrowLeft, MessageCircle, Phone, Send, Mail } from 'lucide-react';
-import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
+import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY, buttonStyle } from '../theme';
 import { childrenOf } from '../data';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 // Delta §19 : `phone_number`/`email` uniques sur le membre + flags de partage indépendants
 // (`share_whatsapp`/`share_phone`/`share_sms`/`share_email`) — remplace l'ancien modèle où
@@ -17,9 +19,17 @@ const CONTACT_METHODS = [
 // Note (delta §18) : ce composant ne reçoit plus jamais memberId === 'mem-vous' — App.jsx
 // (fonction openMember) intercepte ce cas en amont et ouvre la modale Mon profil à la place,
 // pour ne jamais présenter ses propres coordonnées comme celles d'un tiers ("Contacter Vous").
+// Conséquence utile pour V7.30 ci-dessous : cette page ne montre donc JAMAIS la fiche de
+// l'utilisateur courant — pas besoin de vérifier "est-ce moi ?" avant d'afficher le bouton
+// "Retirer ce membre", ce cas est structurellement déjà exclu en amont.
 // V7.18 : `members` reçu en prop (annuaire réel) — remplace l'import direct de MEMBERS.
-export default function MemberDetail({ members, memberId, onBack }) {
+// V7.30 (25 sept.) — "Retirer un membre" : `isAdmin`/`onRemoveMember` transmis par App.jsx.
+// `onRemoveMember` seul (pas de flag séparé) : si absent (mode démo, MEMBERS_FROM_SUPABASE
+// désactivé), le bouton ne s'affiche simplement pas plutôt que d'appeler une fonction inexistante.
+export default function MemberDetail({ members, memberId, onBack, isAdmin, onRemoveMember }) {
   const member = members.find((m) => m.id === memberId);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
   if (!member) return null;
   const kids = childrenOf(member);
   const sharedContacts = CONTACT_METHODS.filter((c) => member[c.shareFlag] && member[c.valueField]);
@@ -86,6 +96,41 @@ export default function MemberDetail({ members, memberId, onBack }) {
         Une fois branchés, ils ouvriront l'application externe correspondante (WhatsApp, téléphone, SMS, e-mail) ;
         aucune messagerie n'est stockée dans ABCZed.
       </p>
+
+      {/* V7.30 — "Retirer ce membre" : admin uniquement. Cette page n'affiche jamais la fiche
+          de l'utilisateur courant (voir la note en tête de fichier), donc pas de garde
+          "pas moi-même" à ajouter ici — déjà garanti par App.jsx (openMember). */}
+      {isAdmin && onRemoveMember && (
+        <button
+          onClick={() => setConfirmingRemove(true)}
+          className="tap-surface"
+          style={{ ...buttonStyle('destructive'), width: '100%', marginTop: 20 }}
+        >
+          Retirer {member.firstName} de la communauté
+        </button>
+      )}
+
+      {confirmingRemove && (
+        <ConfirmDialog
+          title={`Retirer ${member.firstName} ?`}
+          message={`${member.firstName} perdra immédiatement l'accès à cette communauté ABCZed (messages, partages, agenda). Cette action peut être annulée seulement en la ré-invitant plus tard.`}
+          cautiousLabel="Annuler"
+          confirmLabel="Retirer"
+          confirmBusyLabel="Retrait…"
+          busy={removing}
+          onCautious={() => setConfirmingRemove(false)}
+          onConfirm={async () => {
+            setRemoving(true);
+            try {
+              await onRemoveMember(member.id);
+              setConfirmingRemove(false);
+              onBack();
+            } finally {
+              setRemoving(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
