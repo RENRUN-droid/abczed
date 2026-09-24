@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { fetchInvitationPreview, acceptInvitation } from '../invitationsApi';
 import { BLUE, RED, INK, MUTED, BG, CARD_BORDER, FONT_DISPLAY } from '../theme';
 import Logo from '../components/Logo';
+import PasswordField from '../components/PasswordField';
 
 // V7.18 — page d'atterrissage d'un lien d'invitation (/invite/<token>), rendue par Root.jsx
 // AVANT toute branche selon `status` (voir Root.jsx : un visiteur qui clique ce lien n'a, par
@@ -267,8 +268,8 @@ export default function InviteAccept({ token }) {
               </div>
               <div>
                 <label htmlFor="invite-password" style={labelStyle}>Choisis un mot de passe</label>
-                <input
-                  id="invite-password" type="password" required autoComplete="new-password" minLength={6}
+                <PasswordField
+                  id="invite-password" required autoComplete="new-password" minLength={6}
                   value={password} onChange={(e) => setPassword(e.target.value)}
                   disabled={submitting} style={inputStyle}
                 />
@@ -319,8 +320,8 @@ export default function InviteAccept({ token }) {
                     {forgotSubmitting ? 'Envoi…' : 'Mot de passe oublié ?'}
                   </button>
                 </div>
-                <input
-                  id="invite-login-password" type="password" required autoComplete="current-password"
+                <PasswordField
+                  id="invite-login-password" required autoComplete="current-password"
                   value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)}
                   disabled={loginSubmitting} style={inputStyle}
                 />
