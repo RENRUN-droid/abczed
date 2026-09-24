@@ -6,6 +6,7 @@ import { anyFieldMatches } from '../searchUtils';
 import { useScrollRestore } from '../useScrollRestore';
 import PageTitle from '../components/PageTitle';
 import InviteParentSheet from '../components/InviteParentSheet';
+import Avatar from '../components/Avatar';
 
 // V7.18 : `members` reçu en prop (annuaire réel, App.jsx/src/membersApi.js) — remplace l'import
 // direct de MEMBERS (donnée de démonstration, src/data.js). `isAdmin`/`communityId` :
@@ -89,9 +90,9 @@ export default function LaBande({ members, membersLoading, membersError, onOpenM
                 background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 18, padding: '14px 16px', minHeight: 44,
               }}
             >
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: m.avatarColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, flexShrink: 0 }}>
-                {m.firstName.slice(0, 1)}
-              </div>
+              {/* V7.34 — Avatar partagé : vraie photo si mise (m.avatarUrl, memberDirectory.js),
+                  sinon exactement le même cercle couleur+initiale qu'avant. */}
+              <Avatar avatarPath={m.avatarUrl} color={m.avatarColor} initials={m.firstName.slice(0, 1)} size={40} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: INK }}>
                   {m.firstName} {m.lastName}
