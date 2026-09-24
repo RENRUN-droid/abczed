@@ -52,6 +52,10 @@ export function mapMemberRow(row, currentUserId) {
     firstName,
     lastName,
     avatarColor: avatarColorFor(row.id),
+    // V7.34 — chemin de la photo dans le bucket Storage privé `avatars`, ou `null` (jamais de
+    // photo mise, ou retirée) — voir src/avatarApi.js/src/components/Avatar.jsx, qui résolvent
+    // ce chemin en URL signée à l'affichage seulement.
+    avatarUrl: row.avatar_url || null,
     relations,
   };
 }
