@@ -1486,7 +1486,7 @@ export default function App({ activeCommunity, memberships }) {
                 lot) — jamais un fragment d'e-mail ni d'UUID. Voir
                 src/components/ConnectedAvatar.jsx pour le repli neutre explicite (icône,
                 jamais "V"/"?"/une initiale devinée) tant que ce profil n'est pas encore chargé. */}
-            <ConnectedAvatar userId={currentUserId} displayName={activeCommunity?.display_name} size={30} onClick={() => setShowMyProfile(true)} />
+            <ConnectedAvatar userId={currentUserId} displayName={activeCommunity?.display_name} avatarPath={activeCommunity?.avatar_url} size={30} onClick={() => setShowMyProfile(true)} />
           </div>
         )}
 
@@ -1591,6 +1591,7 @@ export default function App({ activeCommunity, memberships }) {
                 // bouton "Retour" déjà présent juste en dessous.
                 connectedUserId={currentUserId}
                 connectedDisplayName={activeCommunity?.display_name}
+                connectedAvatarPath={activeCommunity?.avatar_url}
                 onOpenProfile={() => setShowMyProfile(true)}
               />
             )}
@@ -1621,6 +1622,7 @@ export default function App({ activeCommunity, memberships }) {
                 // garde l'en-tête principal de App.jsx, déjà affiché juste au-dessus).
                 connectedUserId={currentUserId}
                 connectedDisplayName={activeCommunity?.display_name}
+                connectedAvatarPath={activeCommunity?.avatar_url}
                 onOpenProfile={() => setShowMyProfile(true)}
                 // 6e passe (point 2/3) : la flèche ← de la discussion liée et le lien "Voir
                 // tout le fil" ne font PLUS la même chose. La flèche revient à la fiche
@@ -1744,7 +1746,7 @@ export default function App({ activeCommunity, memberships }) {
             onToggleShareFlag={toggleMeShareFlag}
             members={members}
             communityId={communityId}
-            onChildrenChanged={loadMembers}
+            onMemberDataChanged={loadMembers}
           />
         )}
 
