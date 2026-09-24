@@ -3,6 +3,7 @@ import { ArrowLeft, MessageCircle, Phone, Send, Mail } from 'lucide-react';
 import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY, buttonStyle } from '../theme';
 import { childrenOf } from '../data';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Avatar from '../components/Avatar';
 
 // Delta §19 : `phone_number`/`email` uniques sur le membre + flags de partage indépendants
 // (`share_whatsapp`/`share_phone`/`share_sms`/`share_email`) — remplace l'ancien modèle où
@@ -49,8 +50,9 @@ export default function MemberDetail({ members, memberId, onBack, isAdmin, onRem
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20 }}>
-        <div style={{ width: 72, height: 72, borderRadius: '50%', background: member.avatarColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 700, marginBottom: 12 }}>
-          {member.firstName.slice(0, 1)}
+        {/* V7.34 — Avatar partagé : vraie photo si mise, sinon même cercle couleur+initiale. */}
+        <div style={{ marginBottom: 12 }}>
+          <Avatar avatarPath={member.avatarUrl} color={member.avatarColor} initials={member.firstName.slice(0, 1)} size={72} />
         </div>
         <div style={{ fontSize: 19, fontWeight: 700, color: INK }}>{member.firstName} {member.lastName}</div>
         {kids.length > 0 && (
