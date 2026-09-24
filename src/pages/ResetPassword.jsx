@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { BLUE, RED, INK, MUTED, BG, CARD_BORDER, FONT_DISPLAY } from '../theme';
 import Logo from '../components/Logo';
+import PasswordField from '../components/PasswordField';
 
 // V7.19 — écran de changement de mot de passe, rendu par Root.jsx quand status ===
 // 'password-recovery' (voir AuthProvider.jsx : atteint uniquement en ouvrant le lien reçu après
@@ -55,16 +56,16 @@ export default function ResetPassword() {
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <label htmlFor="reset-password" style={labelStyle}>Nouveau mot de passe</label>
-            <input
-              id="reset-password" type="password" autoComplete="new-password" required minLength={6}
+            <PasswordField
+              id="reset-password" autoComplete="new-password" required minLength={6}
               value={password} onChange={(e) => setPassword(e.target.value)}
               disabled={submitting} style={inputStyle}
             />
           </div>
           <div>
             <label htmlFor="reset-password-confirm" style={labelStyle}>Confirme le mot de passe</label>
-            <input
-              id="reset-password-confirm" type="password" autoComplete="new-password" required minLength={6}
+            <PasswordField
+              id="reset-password-confirm" autoComplete="new-password" required minLength={6}
               value={confirm} onChange={(e) => setConfirm(e.target.value)}
               disabled={submitting} style={inputStyle}
             />
