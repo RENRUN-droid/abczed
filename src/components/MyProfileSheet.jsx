@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
-import { X, LogOut, Plus, Pencil, Check } from 'lucide-react';
+import { X, LogOut, Plus, Pencil, Check, Camera } from 'lucide-react';
 import { BLUE, RED, INK, MUTED, CARD_BORDER, FONT_DISPLAY, buttonStyle } from '../theme';
 import { childrenOf } from '../data';
 import { useAuth } from '../auth/AuthProvider';
 import { useModalA11y } from '../useModalA11y';
 import ConfirmDialog from './ConfirmDialog';
+import Avatar from './Avatar';
 import * as childrenApi from '../childrenApi';
+import * as avatarApi from '../avatarApi';
 
 // Delta §19 : flags de partage indépendants sur un numéro/e-mail uniques (voir data.js) —
 // remplace les 4 paires {value, shared} par canal de l'ancien modèle. `LABELS` fait
@@ -25,7 +27,11 @@ const LABELS = { share_whatsapp: 'WhatsApp', share_phone: 'Téléphone', share_s
 // lecture seule pour tout le monde, y compris l'administratrice (sql/02_rls.sql, "écriture
 // volontairement absente en V1"). Voir sql/11_enfants_en_libre_service.sql pour les nouvelles
 // policies, et src/childrenApi.js pour les 3 opérations exposées ici.
-export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag, members, communityId, onChildrenChanged }) {
+//
+// V7.34 (25 sept.) — même écran, ajout de la photo de profil (jusqu'ici uniquement un cercle de
+// couleur avec l'initiale, partout dans l'app). `onChildrenChanged` renommé `onMemberDataChanged`
+// (même callback — App.jsx#loadMembers — mais qui ne concerne plus QUE les enfants désormais).
+export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag, members, communityId, onMemberDataChanged }) {
   const { signOut } = useAuth();
   const me = (members || []).find((m) => m.id === 'mem-vous');
   const kids = me ? childrenOf(me) : [];
@@ -40,12 +46,45 @@ export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag,
   const [removingChild, setRemovingChild] = useState(null);
   const [busy, setBusy] = useState(false);
   const [childrenError, setChildrenError] = useState('');
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+  const fileInputRef = useRef(null);
 
   // Brief pt 6/45 : Escape, clic hors modale, piège de focus, et retour du focus (+ repère
   // visuel) sur l'élément qui a ouvert cette modale (l'avatar du header ou la carte "Vous" de
   // La Bande, selon d'où on vient) — un seul mécanisme générique, voir useModalA11y.js.
   const panelRef = useRef(null);
   const { onBackdropClick } = useModalA11y(panelRef, onClose);
+
+  async function handleAvatarFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permet de resélectionner le même fichier ensuite (ex. après une erreur)
+    if (!file || !me || avatarBusy) return;
+    if (!file.type.startsWith('image/')) { setAvatarError('Choisis une image (photo, JPG, PNG…).'); return; }
+    if (file.size > 5 * 1024 * 1024) { setAvatarError('Photo trop lourde (5 Mo maximum).'); return; }
+    setAvatarBusy(true); setAvatarError('');
+    try {
+      await avatarApi.uploadAvatar(me.userId, me.rawId, file);
+      await onMemberDataChanged?.();
+    } catch {
+      setAvatarError("Impossible d'enregistrer cette photo — réessaie.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    if (!me || avatarBusy) return;
+    setAvatarBusy(true); setAvatarError('');
+    try {
+      await avatarApi.removeAvatar(me.userId, me.rawId, me.avatarUrl);
+      await onMemberDataChanged?.();
+    } catch {
+      setAvatarError('Impossible de retirer la photo — réessaie.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   async function handleAddChild(e) {
     e.preventDefault();
@@ -58,7 +97,7 @@ export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag,
         label: newLabel.trim() || 'Parent',
       });
       setNewFirstName(''); setNewGroupLabel(''); setNewLabel('Parent'); setAdding(false);
-      await onChildrenChanged?.();
+      await onMemberDataChanged?.();
     } catch {
       setChildrenError("Impossible d'ajouter cet enfant — réessaie.");
     } finally {
@@ -79,7 +118,7 @@ export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag,
     try {
       await childrenApi.updateChild(childId, { firstName: editFirstName.trim(), groupLabel: editGroupLabel.trim() });
       setEditingChildId(null);
-      await onChildrenChanged?.();
+      await onMemberDataChanged?.();
     } catch {
       setChildrenError('Impossible d\'enregistrer — réessaie.');
     } finally {
@@ -93,7 +132,7 @@ export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag,
     try {
       await childrenApi.removeChildLink(me.rawId, removingChild.childId);
       setRemovingChild(null);
-      await onChildrenChanged?.();
+      await onMemberDataChanged?.();
     } catch {
       setChildrenError('Impossible de retirer cet enfant — réessaie.');
     } finally {
@@ -113,12 +152,49 @@ export default function MyProfileSheet({ onClose, shareFlags, onToggleShareFlag,
           <p style={{ fontSize: 13.5, color: MUTED, padding: '20px 0' }}>Chargement de ton profil…</p>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-              <div style={{ width: 48, height: 48, borderRadius: '50%', background: me.avatarColor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 700 }}>
-                {me.firstName.slice(0, 1)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+              {/* V7.34 — photo de profil : bucket Storage privé `avatars` + `members.avatar_url`,
+                  déjà entièrement prêts côté base depuis l'origine (voir src/avatarApi.js) —
+                  seule l'interface manquait. Le crayon déclenche un `<input type="file">` caché
+                  (id/htmlFor plutôt qu'un ref direct sur le bouton, pour rester accessible au
+                  clavier) ; tap sur l'avatar lui-même fait la même chose. */}
+              <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
+                <label
+                  htmlFor="avatar-file-input"
+                  className="tap-surface"
+                  style={{ display: 'block', width: 56, height: 56, borderRadius: '50%', cursor: avatarBusy ? 'default' : 'pointer', opacity: avatarBusy ? 0.5 : 1 }}
+                >
+                  <Avatar avatarPath={me.avatarUrl} color={me.avatarColor} initials={me.firstName.slice(0, 1)} size={56} alt="Ta photo de profil" />
+                </label>
+                <input
+                  id="avatar-file-input" ref={fileInputRef} type="file" accept="image/*"
+                  onChange={handleAvatarFileChange} disabled={avatarBusy}
+                  style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+                />
+                <label
+                  htmlFor="avatar-file-input"
+                  className="tap-surface"
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: '50%',
+                    background: BLUE, border: '2px solid #fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: avatarBusy ? 'default' : 'pointer',
+                  }}
+                >
+                  <Camera size={11} color="#fff" />
+                </label>
               </div>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>{me.firstName}{me.lastName ? ` ${me.lastName}` : ''}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{me.firstName}{me.lastName ? ` ${me.lastName}` : ''}</div>
+                {me.avatarUrl && (
+                  <button type="button" onClick={handleRemoveAvatar} disabled={avatarBusy} className="tap-surface" style={{ background: 'none', border: 'none', padding: 0, marginTop: 2, fontSize: 12.5, fontWeight: 600, color: MUTED, cursor: avatarBusy ? 'default' : 'pointer' }}>
+                    {avatarBusy ? 'Un instant…' : 'Retirer la photo'}
+                  </button>
+                )}
+              </div>
             </div>
+
+            {avatarError && <p role="alert" style={{ fontSize: 13, color: RED, margin: '0 0 12px' }}>{avatarError}</p>}
 
             {/* V7.33 — "Mes enfants" : jusqu'ici lecture seule (voir note en tête de fichier). */}
             <div style={{ fontSize: 13, fontWeight: 700, color: INK, margin: '0 0 8px' }}>Mes enfants</div>
