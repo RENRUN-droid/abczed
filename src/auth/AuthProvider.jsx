@@ -31,9 +31,12 @@ export function AuthProvider({ children }) {
     // en-têtes compacts) montre le VRAI nom du membre connecté au lieu d'un "V" figé en dur
     // (défaut confirmé en UAT réelle, brief V7.11 P1). Colonne déjà présente dans le schéma
     // livré (sql/01_schema_and_helpers.sql, table members) — aucune migration nécessaire.
+    // V7.34 : `avatar_url` ajouté à cette même lecture — nécessaire pour que l'avatar connecté
+    // (src/components/ConnectedAvatar.jsx, affiché par App.jsx et CompactHeader.jsx) montre la
+    // vraie photo une fois mise, au lieu de toujours retomber sur l'initiale colorée.
     const { data, error: err } = await supabase
       .from('members')
-      .select('id, community_id, role, status, display_name, communities(name)')
+      .select('id, community_id, role, status, display_name, avatar_url, communities(name)')
       .eq('user_id', currentSession.user.id)
       .eq('status', 'active');
 
