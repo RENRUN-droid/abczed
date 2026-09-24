@@ -1742,6 +1742,9 @@ export default function App({ activeCommunity, memberships }) {
             onClose={() => setShowMyProfile(false)}
             shareFlags={meShareFlags}
             onToggleShareFlag={toggleMeShareFlag}
+            members={members}
+            communityId={communityId}
+            onChildrenChanged={loadMembers}
           />
         )}
 
