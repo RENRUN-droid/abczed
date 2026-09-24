@@ -16,6 +16,7 @@ import { documentById } from '../documents';
 import { openableCardProps } from '../attachmentCardA11y';
 import ActionButton from '../components/ActionButton';
 import ConfirmDialog from '../components/ConfirmDialog';
+import Avatar from '../components/Avatar';
 // V7.8 : `dateSeparatorLabel` était définie ici en local — désormais extraite dans
 // ../dateLabels.js et PARTAGÉE avec Accueil.jsx (dernier message), qui ne calculait avant ce
 // lot aucune étiquette réelle du tout (voir ../dateLabels.js pour le détail du bug corrigé).
@@ -43,7 +44,7 @@ export default function Messages({
   // V7.11 (P1) : en-tête compact (logo + avatar connecté), affiché uniquement dans la vue
   // "thread" (`linkedEvent` vrai) — la vue "messages" non filtrée garde l'en-tête principal de
   // App.jsx, déjà affiché au-dessus de ce composant dans ce cas.
-  connectedUserId, connectedDisplayName, onOpenProfile,
+  connectedUserId, connectedDisplayName, connectedAvatarPath, onOpenProfile,
 }) {
   const [text, setText] = useState('');
   // P3 : désactive le champ/le bouton d'envoi le temps de l'écriture en vol (évite un double
@@ -186,7 +187,7 @@ export default function Messages({
           App.jsx. Voir src/components/CompactHeader.jsx : le bouton "Retour" juste en dessous
           (déjà existant) complète ce bandeau, jamais dupliqué ici. */}
       {linkedEvent && (
-        <CompactHeader currentUserId={connectedUserId} displayName={connectedDisplayName} onOpenProfile={onOpenProfile} />
+        <CompactHeader currentUserId={connectedUserId} displayName={connectedDisplayName} avatarPath={connectedAvatarPath} onOpenProfile={onOpenProfile} />
       )}
       <div style={{ padding: '18px 20px 0' }}>
         {linkedEvent ? (
@@ -329,9 +330,10 @@ export default function Messages({
                   borderRadius: 12, transition: 'background 0.4s',
                 }}
               >
-                <div style={{ width: 30, height: 30, borderRadius: '50%', background: m.color, color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  {m.initials}
-                </div>
+                {/* V7.34 — Avatar partagé (composant) : vraie photo si mise (m.avatarUrl,
+                    messagesApi.js), sinon exactement le même cercle couleur+initiale qu'avant. */}
+                <Avatar avatarPath={m.avatarUrl} color={m.color} initials={m.initials} size={30} />
+
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {/* V7.11 (P2) — défaut confirmé en UAT réelle : les messages de l'utilisateur
                       connecté affichaient son display_name réel comme n'importe quel autre
