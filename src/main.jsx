@@ -32,3 +32,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </AuthProvider>
   </React.StrictMode>,
 )
+
+// PWA — enregistrement du service worker (public/sw.js), après le premier rendu pour ne
+// jamais retarder l'affichage initial. `only in prod build via HTTPS` : les navigateurs
+// n'autorisent de toute façon les service workers que sur HTTPS ou localhost, donc aucune
+// vérification d'environnement supplémentaire n'est nécessaire ici. Échec silencieux et non
+// bloquant si l'API est absente (anciens navigateurs) ou si l'enregistrement échoue — l'app
+// reste pleinement fonctionnelle sans, seule l'installation "écran d'accueil" en dépend.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
