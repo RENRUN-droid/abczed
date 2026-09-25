@@ -487,7 +487,20 @@ export default function Messages({
                       );
                     })()}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', justifyContent: isMine ? 'flex-end' : 'flex-start' }}>
+                  {/* V7.42 (25 sept.) — nouveau retour direct après capture d'écran réelle : le
+                      premier essai (V7.41, deux rangées, la seconde alignée à gauche) créait en
+                      fait un décalage visible entre les deux rangées pour SES PROPRES messages
+                      (`isMine`) — la première restait alignée à DROITE (sous la bulle, ancrée à
+                      droite de l'écran) tandis que la seconde (Modifier/Supprimer) était pourtant
+                      bien à gauche : deux points d'ancrage différents sur deux lignes, d'où
+                      l'impression de dispersion signalée ("ça prend encore un peu dispersé").
+                      Demande précise cette fois, avec capture à l'appui : TOUT sur une seule
+                      ligne, ancrée à GAUCHE en permanence (plus de `justifyContent: isMine ?
+                      'flex-end' : 'flex-start'` — cette bascule selon l'auteur est justement ce
+                      qui cassait l'alignement), juste sous la bulle, légèrement décrochée (pas
+                      collée) mais pas éloignée. Modifier/Supprimer rejoignent donc cette même
+                      rangée (temps/réactions/Répondre/Lier), au lieu d'une rangée séparée. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                     <span style={{ fontSize: 10.5, opacity: 0.5 }}>{m.time}</span>
                     {/* Delta pts 26-28 (arbitrage D3) : pastilles dérivées de reactionSummary,
                         jamais du compteur brut. Taper sa PROPRE pastille la retire ; taper une
@@ -589,59 +602,46 @@ export default function Messages({
                         <Link2 size={11} /> Lier à un événement
                       </button>
                     )}
+                    {/* V7.42 — Modifier/Supprimer réintégrés dans cette même rangée (plus de
+                        rangée séparée, voir commentaire ci-dessus) : même style sans cartouche
+                        (ni bordure ni fond) que Répondre/Lier, icône + texte, zone tactile
+                        ≥44px (Item 8, MIN_TOUCH_TARGET) conservée via `minHeight`/`minWidth`
+                        même si le rendu visible est plus petit. */}
+                    {isMine && (
+                      <button
+                        onClick={() => setEditingMessage(m)}
+                        disabled={mutationPending}
+                        className={mutationPending ? undefined : 'tap-surface'}
+                        aria-label="Modifier ce message"
+                        title="Modifier ce message"
+                        style={{
+                          fontSize: 10.5, color: BLUE, background: 'none', border: 'none',
+                          display: 'flex', alignItems: 'center', gap: 2, borderRadius: 6,
+                          padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                          opacity: mutationPending ? 0.45 : 1,
+                        }}
+                      >
+                        <Pencil size={11} /> Modifier
+                      </button>
+                    )}
+                    {(isMine || isAdmin) && (
+                      <button
+                        onClick={() => { if (!mutationPending) setConfirmingDeleteId(m.id); }}
+                        disabled={mutationPending}
+                        className={mutationPending ? undefined : 'tap-surface'}
+                        aria-label="Supprimer ce message"
+                        title={mutationPending ? 'Suppression en cours…' : 'Supprimer ce message'}
+                        style={{
+                          fontSize: 10.5, color: RED, background: 'none', border: 'none',
+                          display: 'flex', alignItems: 'center', gap: 2, borderRadius: 6,
+                          padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                          opacity: mutationPending ? 0.45 : 1,
+                        }}
+                      >
+                        <Trash2 size={11} /> Supprimer
+                      </button>
+                    )}
                   </div>
-                  {/* V7.41 (25 sept.) — retour direct de l'utilisatrice après le premier
-                      allègement (V7.40, icône seule mais toujours dans la "cartouche" bordée/
-                      fond blanc de buttonStyle) : encore jugé trop encombrant. Demande explicite
-                      et précise cette fois : plus AUCUNE cartouche (ni bordure ni fond) — icône +
-                      texte à nouveau (comme "Répondre"/"Lier à un événement", qui n'ont jamais
-                      posé problème, seul le fond/bordure de Modifier/Supprimer était visé), posés
-                      directement sur le fond crème de la page, l'un à côté de l'autre, sous la
-                      bulle, à gauche — donc dans une rangée dédiée séparée de la précédente
-                      (temps/réactions/Répondre/Lier), qui reste alignée à droite pour ses propres
-                      messages (`isMine`) : sans cette séparation, Modifier/Supprimer suivraient
-                      cette même justification à droite plutôt que de rester à gauche comme
-                      demandé. Zone tactile : toujours ≥44px (Item 8, MIN_TOUCH_TARGET) via
-                      `minHeight`/`minWidth`, même si la zone visible (icône+texte) est plus
-                      petite — le padding invisible complète la cible sans agrandir le rendu. */}
-                  {(isMine || isAdmin) && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 2 }}>
-                      {isMine && (
-                        <button
-                          onClick={() => setEditingMessage(m)}
-                          disabled={mutationPending}
-                          className={mutationPending ? undefined : 'tap-surface'}
-                          aria-label="Modifier ce message"
-                          title="Modifier ce message"
-                          style={{
-                            fontSize: 10.5, color: BLUE, background: 'none', border: 'none',
-                            display: 'flex', alignItems: 'center', gap: 3, borderRadius: 6,
-                            padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
-                            opacity: mutationPending ? 0.45 : 1, fontWeight: 600,
-                          }}
-                        >
-                          <Pencil size={12} /> Modifier
-                        </button>
-                      )}
-                      {(isMine || isAdmin) && (
-                        <button
-                          onClick={() => { if (!mutationPending) setConfirmingDeleteId(m.id); }}
-                          disabled={mutationPending}
-                          className={mutationPending ? undefined : 'tap-surface'}
-                          aria-label="Supprimer ce message"
-                          title={mutationPending ? 'Suppression en cours…' : 'Supprimer ce message'}
-                          style={{
-                            fontSize: 10.5, color: RED, background: 'none', border: 'none',
-                            display: 'flex', alignItems: 'center', gap: 3, borderRadius: 6,
-                            padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
-                            opacity: mutationPending ? 0.45 : 1, fontWeight: 600,
-                          }}
-                        >
-                          <Trash2 size={12} /> Supprimer
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
               </div>
