@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Shield, Paperclip, Smile, SmilePlus, Mic, Send, Link2, X, FileText, Search, ExternalLink, Download, Pencil, Trash2, Reply } from 'lucide-react';
-import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY, MIN_TOUCH_TARGET } from '../theme';
+import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 // V7.7 (P4) : `linkableEvents` (data.js, MOCK_EVENTS) n'est plus importé ici — le choix d'un
 // événement réel à lier vient désormais de la prop `events` (Agenda réel, transmise par
 // App.jsx), filtrée localement dans LinkEventPicker ci-dessous (exclusion des anniversaires,
@@ -602,11 +602,20 @@ export default function Messages({
                         <Link2 size={11} /> Lier à un événement
                       </button>
                     )}
-                    {/* V7.42 — Modifier/Supprimer réintégrés dans cette même rangée (plus de
-                        rangée séparée, voir commentaire ci-dessus) : même style sans cartouche
-                        (ni bordure ni fond) que Répondre/Lier, icône + texte, zone tactile
-                        ≥44px (Item 8, MIN_TOUCH_TARGET) conservée via `minHeight`/`minWidth`
-                        même si le rendu visible est plus petit. */}
+                    {/* V7.43 (25 sept.) — cause réelle du désordre visible sur la capture V7.42 :
+                        `minHeight: MIN_TOUCH_TARGET` (44px) posé directement sur ces deux
+                        boutons FORÇAIT chaque ligne où ils atterrissaient (flexWrap: 'wrap') à
+                        faire 44px de haut, alors que les autres éléments de la même rangée
+                        (heure, réactions, Répondre, Lier) ne font que ~15-20px — d'où les
+                        immenses espaces vides entre les lignes une fois la rangée repliée sur
+                        plusieurs lignes (6 éléments ne tenaient plus sur une seule ligne large
+                        de ~260px). Correctif : zone tactile ≥44px (Item 8, MIN_TOUCH_TARGET)
+                        obtenue par `padding` généreux + `margin` négatif de compensation — la
+                        cible réellement tapable fait bien 44px, mais sa contribution à la
+                        hauteur de ligne du flex redevient celle du contenu visible (~15px),
+                        exactement comme Répondre/Lier juste à côté. Résultat : la rangée entière
+                        tient à nouveau sur une seule ligne (ou se replie proprement sur une
+                        deuxième si l'écran est très étroit), sans plus jamais ce trou géant. */}
                     {isMine && (
                       <button
                         onClick={() => setEditingMessage(m)}
@@ -617,7 +626,7 @@ export default function Messages({
                         style={{
                           fontSize: 10.5, color: BLUE, background: 'none', border: 'none',
                           display: 'flex', alignItems: 'center', gap: 2, borderRadius: 6,
-                          padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                          padding: '15px 6px', margin: '-15px -6px',
                           opacity: mutationPending ? 0.45 : 1,
                         }}
                       >
@@ -634,7 +643,7 @@ export default function Messages({
                         style={{
                           fontSize: 10.5, color: RED, background: 'none', border: 'none',
                           display: 'flex', alignItems: 'center', gap: 2, borderRadius: 6,
-                          padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                          padding: '15px 6px', margin: '-15px -6px',
                           opacity: mutationPending ? 0.45 : 1,
                         }}
                       >
