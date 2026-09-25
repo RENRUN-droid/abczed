@@ -64,3 +64,39 @@ self.addEventListener('fetch', (event) => {
   }
   // Tout le reste (appels Supabase inclus) : navigateur natif, ce service worker n'intervient pas.
 });
+
+// ABCZed — V7.44 (25 sept.) : la cloche — réception d'une notification push envoyée par
+// l'Edge Function send-push (payload JSON : { title, body, url }). Ajout strictement additif,
+// ne touche à rien du comportement ci-dessus (aucune mise en cache liée aux notifications).
+self.addEventListener('push', (event) => {
+  let data = { title: 'ABCZed', body: 'Nouveau message', url: '/' };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch {
+    // Payload non-JSON ignoré silencieusement — on garde le message de repli ci-dessus plutôt
+    // que de faire échouer l'affichage de la notification.
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/pwa/icon-192.png',
+      badge: '/pwa/icon-192.png',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+// Un tap sur la notification ramène sur un onglet ABCZed déjà ouvert s'il y en a un, sinon en
+// ouvre un nouveau — jamais un deuxième onglet quand un premier est déjà là.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
+});
