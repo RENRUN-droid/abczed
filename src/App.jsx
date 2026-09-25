@@ -42,7 +42,7 @@ import * as membersApi from './membersApi';
 // avant ce lot).
 import * as sharesApi from './sharesApi';
 import { useAuth } from './auth/AuthProvider';
-import { BG, INK, BLUE, RED } from './theme';
+import { BG, INK, BLUE, RED, MUTED, MIN_TOUCH_TARGET } from './theme';
 import { captureNavState, clearNavState } from './navMemory';
 import { resolveEventById } from './resolveEvent';
 import { setSectionOrigin, clearSectionOrigin } from './sectionOrigin';
@@ -59,6 +59,11 @@ import { createReloadScheduler } from './reloadScheduler';
 // l'arbitrage derrière chaque drapeau.
 import { AGENDA_FROM_SUPABASE, MESSAGES_FROM_SUPABASE, MEMBERS_FROM_SUPABASE, SHARES_FROM_SUPABASE, BILLET_FROM_SUPABASE } from './dataSourceFlags';
 import * as billetApi from './billetApi';
+// V7.44 (25 sept.) — la cloche : notifications push réelles (niveau système). Module dédié
+// (pushApi.js), même principe que avatarApi.js/childrenApi.js — App.jsx n'appelle que ses
+// fonctions exportées, jamais de logique Push API directement ici.
+import * as pushApi from './pushApi';
+import { Bell, BellOff } from 'lucide-react';
 
 // memberships est reçu mais pas encore utilisé dans ce bloc — disponible pour la
 // prochaine phase (migration des écrans métier), pas juste accessible "par accident"
@@ -131,6 +136,13 @@ export default function App({ activeCommunity, memberships }) {
   const [billetLoading, setBilletLoading] = useState(BILLET_FROM_SUPABASE);
   const [billetError, setBilletError] = useState('');
   const [rsvpBusy, setRsvpBusy] = useState(false);
+  // V7.44 (25 sept.) — la cloche. `pushSubscribed` reflète l'état RÉEL du navigateur (interrogé
+  // au montage par pushApi.getPushSubscriptionState, jamais supposé) — un utilisateur qui a
+  // révoqué la permission depuis les réglages du navigateur, hors ABCZed, doit voir la cloche
+  // repasser à l'état "off" au prochain chargement. `pushBusy` désactive le bouton pendant
+  // l'attente réseau (demande de permission + écriture en base), même contrat que rsvpBusy.
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   // V7.11 (P1) — un seul ordonnanceur partagé pour toute la session (App.jsx ne se démonte
   // jamais), par domaine ('messages' couvre messages+réactions, 'agenda' couvre
   // événements+RSVP/participants — voir src/reloadScheduler.js pour l'explication complète de
@@ -319,6 +331,41 @@ export default function App({ activeCommunity, memberships }) {
   async function handleRemoveMember(memberId) {
     await membersApi.removeMember(memberId);
     await loadMembers();
+  }
+
+  // V7.44 (25 sept.) — la cloche : état réel au chargement (voir commentaire sur pushSubscribed
+  // ci-dessus). N'affiche jamais la cloche comme "active" par optimisme — silencieux en cas
+  // d'échec (navigateur non compatible, permission déjà refusée définitivement) : la cloche
+  // reste alors simplement à l'état "off", pas d'erreur bloquante pour une vérification passive.
+  useEffect(() => {
+    if (!currentUserId) return;
+    pushApi
+      .getPushSubscriptionState()
+      .then(setPushSubscribed)
+      .catch(() => setPushSubscribed(false));
+  }, [currentUserId]);
+
+  // Bascule volontaire par l'utilisatrice (tap sur la cloche) — jamais automatique. En échec
+  // (permission refusée, navigateur non compatible), un message explicite plutôt qu'un échec
+  // silencieux : la personne doit comprendre pourquoi la cloche n'a pas changé d'état.
+  async function toggleNotifications() {
+    if (pushBusy) return;
+    setPushBusy(true);
+    try {
+      if (pushSubscribed) {
+        await pushApi.unsubscribeFromPush();
+        setPushSubscribed(false);
+        setToastMessage('Notifications désactivées.');
+      } else {
+        await pushApi.subscribeToPush(currentUserId);
+        setPushSubscribed(true);
+        setToastMessage('Notifications activées.');
+      }
+    } catch (err) {
+      setToastMessage(err?.message || 'Impossible de modifier les notifications.');
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   // ---------------------------------------------------------------------------------------
@@ -1454,14 +1501,38 @@ export default function App({ activeCommunity, memberships }) {
         {['accueil', 'agenda', 'messages', 'partages', 'labande'].includes(view) && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 0' }}>
             <Logo size={30} />
-            {/* V7.11 (P1) : remplace le "V" figé en dur — affiché auparavant quel que soit le
-                compte réellement connecté (défaut confirmé en UAT réelle, A1 et A2 montraient
-                tous deux la même lettre). `activeCommunity?.display_name` vient de
-                `members.display_name` (AuthProvider.jsx, colonne ajoutée à la lecture pour ce
-                lot) — jamais un fragment d'e-mail ni d'UUID. Voir
-                src/components/ConnectedAvatar.jsx pour le repli neutre explicite (icône,
-                jamais "V"/"?"/une initiale devinée) tant que ce profil n'est pas encore chargé. */}
-            <ConnectedAvatar userId={currentUserId} displayName={activeCommunity?.display_name} avatarPath={activeCommunity?.avatar_url} size={30} onClick={() => setShowMyProfile(true)} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {/* V7.44 (25 sept.) : la cloche — visible seulement si le navigateur supporte
+                  réellement les notifications push (voir pushApi.isPushSupported) : jamais un
+                  bouton qui plante au clic sur un navigateur incompatible. Cloche pleine +
+                  bleue quand active, cloche barrée + grise sinon — même paire d'icônes que le
+                  reste de l'appli (lucide-react, voir BottomNav.jsx). */}
+              {pushApi.isPushSupported() && (
+                <button
+                  type="button"
+                  onClick={toggleNotifications}
+                  disabled={pushBusy}
+                  aria-label={pushSubscribed ? 'Désactiver les notifications' : 'Activer les notifications'}
+                  aria-pressed={pushSubscribed}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
+                    background: 'none', border: 'none', borderRadius: 999,
+                    opacity: pushBusy ? 0.5 : 1,
+                  }}
+                >
+                  {pushSubscribed ? <Bell size={20} color={BLUE} /> : <BellOff size={20} color={MUTED} />}
+                </button>
+              )}
+              {/* V7.11 (P1) : remplace le "V" figé en dur — affiché auparavant quel que soit le
+                  compte réellement connecté (défaut confirmé en UAT réelle, A1 et A2 montraient
+                  tous deux la même lettre). `activeCommunity?.display_name` vient de
+                  `members.display_name` (AuthProvider.jsx, colonne ajoutée à la lecture pour ce
+                  lot) — jamais un fragment d'e-mail ni d'UUID. Voir
+                  src/components/ConnectedAvatar.jsx pour le repli neutre explicite (icône,
+                  jamais "V"/"?"/une initiale devinée) tant que ce profil n'est pas encore chargé. */}
+              <ConnectedAvatar userId={currentUserId} displayName={activeCommunity?.display_name} avatarPath={activeCommunity?.avatar_url} size={30} onClick={() => setShowMyProfile(true)} />
+            </div>
           </div>
         )}
 
