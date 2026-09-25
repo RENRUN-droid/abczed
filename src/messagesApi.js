@@ -19,10 +19,16 @@ import { avatarColorFor, initialsOf } from './avatarColor.js';
 // P2 — Lecture réelle, auteurs résolus, réactions résolues (table normalisée
 // message_reactions, jamais la colonne historique messages.reactions).
 // ---------------------------------------------------------------------------
+// V7.39 (25 sept.) — `reply_to:reply_to_id(id, text, author_id)` : embed PostgREST vers la
+// MÊME table (`messages.reply_to_id` référence `messages.id`, vraie FK, voir
+// sql/14_reponses_message.sql) — syntaxe standard pour une auto-référence, `reply_to` est un
+// simple alias côté client, pas un nom de colonne. `null` si le message ne répond à rien, ou si
+// le message d'origine a été supprimé depuis (reply_to_id repassé à `null` par la base elle-même,
+// `on delete set null`) — jamais une citation cassée à gérer côté interface.
 export async function fetchMessages(communityId) {
   const { data: rows, error } = await supabase
     .from('messages')
-    .select('id, author_id, text, linked_event_id, created_at')
+    .select('id, author_id, text, linked_event_id, created_at, reply_to_id, reply_to:reply_to_id(id, text, author_id)')
     .eq('community_id', communityId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -37,8 +43,12 @@ export async function fetchMessages(communityId) {
   // auteurs de réactions ("qui a réagi") — évite deux allers-retours réseau séparés pour la
   // même table.
   const authorIds = rows.map((m) => m.author_id);
+  // V7.39 — l'auteur du message CITÉ (reply_to) a lui aussi besoin d'un nom résolu, pour
+  // afficher "Réponse à {prénom}" — même lecture `members` que pour les auteurs/réacteurs,
+  // pas un aller-retour réseau séparé.
+  const replyAuthorIds = rows.map((m) => m.reply_to?.author_id).filter(Boolean);
   const reactorIds = reactionRows.map((r) => r.user_id);
-  const allUserIds = [...new Set([...authorIds, ...reactorIds])];
+  const allUserIds = [...new Set([...authorIds, ...replyAuthorIds, ...reactorIds])];
   let namesByUserId = {};
   let avatarUrlByUserId = {};
   if (allUserIds.length > 0) {
@@ -92,6 +102,10 @@ export async function fetchMessages(communityId) {
       time: created.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
       reactions: reactionsByMessage.get(m.id) || [],
       linkedEventId: m.linked_event_id,
+      // V7.39 — citation du message auquel celui-ci répond, déjà entièrement résolue (texte +
+      // nom d'auteur) : Messages.jsx n'a qu'à l'afficher, jamais besoin de chercher le message
+      // d'origine dans le fil déjà chargé.
+      replyTo: m.reply_to ? { id: m.reply_to.id, text: m.reply_to.text, authorId: m.reply_to.author_id, author: displayNameOf(m.reply_to.author_id) } : null,
     };
   });
 }
@@ -104,12 +118,16 @@ export async function fetchMessages(communityId) {
 // auteur : le texte normalisé (trim) est déjà appliqué ici, la validation "non vide" reste
 // côté appelant (App.jsx) pour rester la même responsabilité qu'ailleurs dans le projet.
 // ---------------------------------------------------------------------------
-export async function sendMessage(communityId, authorId, { text, linkedEventId }) {
+export async function sendMessage(communityId, authorId, { text, linkedEventId, replyToId }) {
   const { error } = await supabase.from('messages').insert([{
     community_id: communityId,
     author_id: authorId,
     text: (text || '').trim(),
     linked_event_id: linkedEventId || null,
+    // V7.39 — voir sql/14_reponses_message.sql : un trigger serveur vérifie déjà que
+    // `replyToId` (s'il est fourni) pointe vers un message de LA MÊME communauté — pas besoin
+    // de dupliquer cette vérification ici.
+    reply_to_id: replyToId || null,
   }]);
   if (error) throw error;
 }
