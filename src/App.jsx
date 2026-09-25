@@ -914,7 +914,7 @@ export default function App({ activeCommunity, memberships }) {
   // rien n'a été persisté". Jamais de mise à jour optimiste locale du fil : après un envoi
   // réussi, on RECHARGE l'état réel (loadMessages), qui fait foi — un message qui semblerait
   // envoyé côté interface mais rejeté côté serveur (ex. RLS) ne doit jamais rester affiché.
-  async function sendMessage({ text, linkedEventId }) {
+  async function sendMessage({ text, linkedEventId, replyToId }) {
     // Défense en profondeur : Messages.jsx bloque déjà l'envoi d'un texte vide/blanc côté
     // interface (bouton désactivé), mais on ne fait pas confiance à l'appelant pour ça seul.
     if (!(text || '').trim()) return false;
@@ -923,7 +923,7 @@ export default function App({ activeCommunity, memberships }) {
       return false;
     }
     try {
-      await messagesApi.sendMessage(communityId, currentUserId, { text, linkedEventId });
+      await messagesApi.sendMessage(communityId, currentUserId, { text, linkedEventId, replyToId });
     } catch (err) {
       // Interdiction explicite du brief : jamais une erreur réelle masquée ou transformée en
       // silence — message honnête, le texte reste dans le champ côté Messages.jsx (contrat de
