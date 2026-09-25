@@ -100,6 +100,11 @@ export async function fetchMessages(communityId) {
       text: m.text,
       date: localIso(created),
       time: created.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      // V7.45 (badge rouge sur la cloche) — horodatage brut conservé tel quel (jamais reformaté),
+      // uniquement pour être comparé côté App.jsx à `messages_last_read_at` (comparaison de VRAIS
+      // instants, `date`/`time` ci-dessus sont des chaînes déjà formatées pour l'affichage local,
+      // impropres à une comparaison fiable). Jamais affiché tel quel dans l'interface.
+      createdAtIso: m.created_at,
       reactions: reactionsByMessage.get(m.id) || [],
       linkedEventId: m.linked_event_id,
       // V7.39 — citation du message auquel celui-ci répond, déjà entièrement résolue (texte +
@@ -257,4 +262,43 @@ export function subscribeToMessages(communityId, onChange) {
     )
     .subscribe();
   return () => supabase.removeChannel(channel);
+}
+
+// ---------------------------------------------------------------------------
+// V7.45 — Badge rouge sur la cloche (demande de Soizic, 25 sept.). Voir sql/16_last_read_messages
+// pour le détail des droits (déjà couverts, aucun grant/policy nouveau). Volontairement DEUX
+// fonctions dédiées ici plutôt qu'un champ ajouté à membersApi.fetchCommunityMembers : cette
+// donnée (quand MOI j'ai ouvert le fil) n'a rien à voir avec l'annuaire La Bande (qui liste les
+// AUTRES membres) — même séparation de responsabilités que le reste de ce fichier vis-à-vis de
+// api.js/agendaApi.js/membersApi.js (voir commentaire en tête de fichier).
+// ---------------------------------------------------------------------------
+
+// Lue une seule fois par changement de communauté/utilisateur (App.jsx) — `null` si la personne
+// n'a jamais ouvert le fil de messages de cette communauté (colonne par défaut `null`, voir
+// sql/16), jamais une date arbitraire substituée ici : App.jsx doit pouvoir distinguer "jamais
+// ouvert" (tout message d'autrui est non lu) d'une vraie date passée.
+export async function fetchLastReadAt(communityId, userId) {
+  const { data, error } = await supabase
+    .from('members')
+    .select('messages_last_read_at')
+    .eq('community_id', communityId)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (error) throw error;
+  return data?.messages_last_read_at || null;
+}
+
+// Appelée par App.jsx à chaque fois que la vue Messages (fil complet OU fil filtré par
+// événement — les deux affichent le même composant Messages.jsx) devient active. Filtre sur
+// `user_id = userId` (jamais sur l'id de ligne members) : la policy "update_own_display_fields_
+// or_admin" (sql/02_rls.sql) autorise déjà ça pour SA PROPRE ligne, pas besoin que App.jsx
+// connaisse ou résolve l'id de ligne members de la personne connectée pour ce seul usage.
+export async function markMessagesRead(communityId, userId) {
+  const { error } = await supabase
+    .from('members')
+    .update({ messages_last_read_at: new Date().toISOString() })
+    .eq('community_id', communityId)
+    .eq('user_id', userId);
+  if (error) throw error;
 }
