@@ -22,6 +22,17 @@ export default function LaBande({ members, membersLoading, membersError, onOpenM
   // le scroll et le focus sur la carte parent d'origine.
   useScrollRestore(restoreState, onRestoreConsumed);
 
+  // V7.40 (25 sept.) — bug réel signalé par l'utilisatrice (recette réelle, rechargement de
+  // page) : `members` était ABSENT du tableau de dépendances de ce useMemo, alors que la
+  // fonction le lit directement. Au premier rendu, `members` vaut `[]` (chargement pas encore
+  // terminé, voir App.jsx) — `filtered` se calcule alors une fois, sur cette liste vide, et
+  // reste figé sur cette valeur pour toute la durée de vie du composant : quand `members` se
+  // remplit ensuite (chargement terminé), React ne recalcule PLUS `filtered` puisque sa seule
+  // dépendance déclarée (`query`) n'a pas changé — fermeture (closure) périmée classique. Effet
+  // observé : "La Bande" affichait "Aucun membre trouvé" (le message prévu pour une RECHERCHE
+  // sans résultat, `members.length > 0 && filtered.length === 0`, voir plus bas) alors que les
+  // membres étaient bien chargés. Pas un bug de CE lot (V7.39) — ce code n'a pas été touché
+  // aujourd'hui — mais découvert par l'utilisatrice en rechargeant la page dans la foulée.
   const filtered = useMemo(() => {
     const list = [...members].sort((a, b) => a.firstName.localeCompare(b.firstName, 'fr'));
     if (!query.trim()) return list;
@@ -31,7 +42,7 @@ export default function LaBande({ members, membersLoading, membersError, onOpenM
       const kids = childrenOf(m);
       return anyFieldMatches([m.firstName, m.lastName, ...kids.map((c) => c.firstName), ...kids.map((c) => c.groupLabel)], query);
     });
-  }, [query]);
+  }, [query, members]);
 
   return (
     <div className="page-shell" style={{ '--section-accent': SECTION_THEMES.labande.color }}>
