@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Logo from './components/Logo';
 import BottomNav from './components/BottomNav';
 import ConnectedAvatar from './components/ConnectedAvatar';
@@ -143,6 +143,13 @@ export default function App({ activeCommunity, memberships }) {
   // l'attente réseau (demande de permission + écriture en base), même contrat que rsvpBusy.
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  // V7.45 (25 sept.) — badge rouge sur la cloche (demande de Soizic), INDÉPENDANT de
+  // pushSubscribed ci-dessus : pushSubscribed = "les notifications système sont activées",
+  // lastReadAt/hasUnreadMessages ci-dessous = "il y a des messages reçus dans le fil depuis la
+  // dernière ouverture" — les deux peuvent varier indépendamment (ex. notifications désactivées
+  // mais fil jamais ouvert). `null` = jamais ouvert le fil de cette communauté (voir
+  // messagesApi.fetchLastReadAt), pas une date à traiter comme réelle.
+  const [lastReadAt, setLastReadAt] = useState(null);
   // V7.11 (P1) — un seul ordonnanceur partagé pour toute la session (App.jsx ne se démonte
   // jamais), par domaine ('messages' couvre messages+réactions, 'agenda' couvre
   // événements+RSVP/participants — voir src/reloadScheduler.js pour l'explication complète de
@@ -367,6 +374,54 @@ export default function App({ activeCommunity, memberships }) {
       setPushBusy(false);
     }
   }
+
+  // V7.45 (25 sept.) — badge rouge : lecture initiale de `messages_last_read_at` (une seule fois
+  // par changement de communauté/utilisateur — la mise à jour après passage sur le fil, plus
+  // bas, met déjà `lastReadAt` à jour localement sans repasser par ce chargement). Échec
+  // silencieux volontaire (`.catch(() => setLastReadAt(null))`) : même raisonnement que
+  // pushSubscribed ci-dessus, une vérification passive ne doit jamais bloquer le reste de
+  // l'écran — au pire le badge se comporte comme "jamais lu" jusqu'au prochain chargement.
+  useEffect(() => {
+    if (!MESSAGES_FROM_SUPABASE || !communityId || !currentUserId) {
+      setLastReadAt(null);
+      return;
+    }
+    messagesApi
+      .fetchLastReadAt(communityId, currentUserId)
+      .then(setLastReadAt)
+      .catch(() => setLastReadAt(null));
+  }, [communityId, currentUserId]);
+
+  // V7.45 — marque le fil comme lu dès que la personne arrive sur la vue Messages, qu'il
+  // s'agisse du fil complet ('messages') ou du fil filtré par événement ('thread') : les deux
+  // affichent le même composant Messages.jsx (voir plus bas), donc les deux comptent comme
+  // "a vu le fil". Écrit en base (pour que le badge reste éteint à la prochaine connexion) ET
+  // localement (pour que le badge s'éteigne immédiatement à l'écran, sans attendre un aller-
+  // retour réseau) — échec réseau silencieux ici aussi : ne jamais bloquer l'affichage du fil
+  // lui-même pour une mise à jour de statut de lecture.
+  useEffect(() => {
+    if (!MESSAGES_FROM_SUPABASE || !communityId || !currentUserId) return;
+    if (view !== 'messages' && view !== 'thread') return;
+    const readAt = new Date().toISOString();
+    messagesApi
+      .markMessagesRead(communityId, currentUserId)
+      .then(() => setLastReadAt(readAt))
+      .catch(() => {});
+  }, [view, communityId, currentUserId]);
+
+  // V7.45 — dérivé de `thread` + `lastReadAt` : vrai s'il existe au moins un message reçu d'un
+  // AUTRE membre (jamais compté pour ses propres messages — s'envoyer un message à soi-même
+  // n'existe pas, mais par cohérence avec send-push qui exclut déjà l'auteur, voir Edge Function)
+  // dont l'horodatage réel (`createdAtIso`, pas `date`/`time` déjà formatés pour l'affichage) est
+  // postérieur à `lastReadAt`. `lastReadAt === null` (jamais ouvert le fil) : tout message
+  // d'autrui compte comme non lu.
+  const hasUnreadMessages = useMemo(() => {
+    return thread.some((m) => {
+      if (m.authorId === currentUserId) return false;
+      if (!lastReadAt) return true;
+      return new Date(m.createdAtIso) > new Date(lastReadAt);
+    });
+  }, [thread, currentUserId, lastReadAt]);
 
   // ---------------------------------------------------------------------------------------
   // V7.7 — Messages (P1/P2/P6). Même méthode défensive que loadMemberships (AuthProvider.jsx) :
@@ -1506,7 +1561,13 @@ export default function App({ activeCommunity, memberships }) {
                   réellement les notifications push (voir pushApi.isPushSupported) : jamais un
                   bouton qui plante au clic sur un navigateur incompatible. Cloche pleine +
                   bleue quand active, cloche barrée + grise sinon — même paire d'icônes que le
-                  reste de l'appli (lucide-react, voir BottomNav.jsx). */}
+                  reste de l'appli (lucide-react, voir BottomNav.jsx).
+                  V7.45 : petit point rouge superposé (demande de Soizic) — INDÉPENDANT de la
+                  couleur bleue/grise ci-dessus, qui reste l'état "notifications système
+                  activées ou non". Ce point signale "il y a des messages reçus depuis la
+                  dernière ouverture du fil" (voir hasUnreadMessages), que la cloche soit bleue
+                  ou grise. `position: relative` sur le bouton uniquement pour ce point — aucun
+                  changement du bouton lui-même (taille, cible tactile, comportement au clic). */}
               {pushApi.isPushSupported() && (
                 <button
                   type="button"
@@ -1519,9 +1580,20 @@ export default function App({ activeCommunity, memberships }) {
                     width: MIN_TOUCH_TARGET, height: MIN_TOUCH_TARGET,
                     background: 'none', border: 'none', borderRadius: 999,
                     opacity: pushBusy ? 0.5 : 1,
+                    position: 'relative',
                   }}
                 >
                   {pushSubscribed ? <Bell size={20} color={BLUE} /> : <BellOff size={20} color={MUTED} />}
+                  {hasUnreadMessages && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute', top: 8, right: 8,
+                        width: 9, height: 9, borderRadius: 999,
+                        background: RED, border: `1.5px solid ${BG}`,
+                      }}
+                    />
+                  )}
                 </button>
               )}
               {/* V7.11 (P1) : remplace le "V" figé en dur — affiché auparavant quel que soit le
