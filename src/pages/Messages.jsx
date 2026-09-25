@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Shield, Paperclip, Smile, SmilePlus, Mic, Send, Link2, X, FileText, Search, ExternalLink, Download, Pencil, Trash2, Reply } from 'lucide-react';
-import { BLUE, INK, MUTED, CARD_BORDER, SECTION_THEMES, buttonStyle, FONT_DISPLAY } from '../theme';
+import { BLUE, INK, MUTED, CARD_BORDER, SECTION_THEMES, buttonStyle, FONT_DISPLAY, MIN_TOUCH_TARGET } from '../theme';
 // V7.7 (P4) : `linkableEvents` (data.js, MOCK_EVENTS) n'est plus importé ici — le choix d'un
 // événement réel à lier vient désormais de la prop `events` (Agenda réel, transmise par
 // App.jsx), filtrée localement dans LinkEventPicker ci-dessous (exclusion des anniversaires,
@@ -590,32 +590,35 @@ export default function Messages({
                       </button>
                     )}
                     {isMine && (
-                      // Item 8 : bouton "Modifier" porté à MIN_TOUCH_TARGET (44px) via
-                      // buttonStyle('secondary', {compact:true}) — convention phase 1
-                      // (theme.js/ActionButton.jsx), au lieu d'une zone tactile ~25px réelle
-                      // dictée par un simple padding de 2px sur un texte 10.5px.
+                      // Item 8 (zone tactile ≥44px, MIN_TOUCH_TARGET) TOUJOURS respecté — mais
+                      // V7.40 (25 sept.), retour direct de l'utilisatrice sur l'encombrement
+                      // visuel de cette rangée d'actions une fois "Répondre" ajouté (V7.39) :
+                      // icône SEULE désormais (bordure colorée conservée pour distinguer
+                      // Modifier/bleu de Supprimer/rouge), largeur fixée à MIN_TOUCH_TARGET au
+                      // lieu de s'étirer au texte — même zone tactile carrée de 44px, beaucoup
+                      // moins de largeur occupée (le texte du libellé reste sur aria-label/
+                      // title, jamais perdu pour l'accessibilité).
                       <button
                         onClick={() => setEditingMessage(m)}
                         disabled={mutationPending}
                         className={mutationPending ? undefined : 'tap-surface'}
                         aria-label="Modifier ce message"
-                        style={{ ...buttonStyle('secondary', { compact: true }), padding: '0 12px', fontSize: 12, gap: 5, opacity: mutationPending ? 0.45 : 1 }}
+                        title="Modifier ce message"
+                        style={{ ...buttonStyle('secondary', { compact: true }), width: MIN_TOUCH_TARGET, padding: 0, opacity: mutationPending ? 0.45 : 1 }}
                       >
-                        <Pencil size={13} /> Modifier
+                        <Pencil size={15} />
                       </button>
                     )}
                     {(isMine || isAdmin) && (
-                      // Item 8 : même correctif de zone tactile, variante destructive
-                      // (buttonStyle('destructive', {compact:true})) — cohérent avec le rouge
-                      // déjà utilisé (RED, theme.js, plus un hex codé en dur).
                       <button
                         onClick={() => { if (!mutationPending) setConfirmingDeleteId(m.id); }}
                         disabled={mutationPending}
                         className={mutationPending ? undefined : 'tap-surface'}
                         aria-label="Supprimer ce message"
-                        style={{ ...buttonStyle('destructive', { compact: true }), padding: '0 12px', fontSize: 12, gap: 5, opacity: mutationPending ? 0.45 : 1 }}
+                        title={mutationPending ? 'Suppression en cours…' : 'Supprimer ce message'}
+                        style={{ ...buttonStyle('destructive', { compact: true }), width: MIN_TOUCH_TARGET, padding: 0, opacity: mutationPending ? 0.45 : 1 }}
                       >
-                        <Trash2 size={13} /> {mutationPending ? 'En cours…' : 'Supprimer'}
+                        <Trash2 size={15} />
                       </button>
                     )}
                   </div>
