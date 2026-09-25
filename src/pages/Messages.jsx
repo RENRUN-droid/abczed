@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Shield, Paperclip, Smile, SmilePlus, Mic, Send, Link2, X, FileText, Search, ExternalLink, Download, Pencil, Trash2, Reply } from 'lucide-react';
-import { BLUE, INK, MUTED, CARD_BORDER, SECTION_THEMES, buttonStyle, FONT_DISPLAY, MIN_TOUCH_TARGET } from '../theme';
+import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY, MIN_TOUCH_TARGET } from '../theme';
 // V7.7 (P4) : `linkableEvents` (data.js, MOCK_EVENTS) n'est plus importé ici — le choix d'un
 // événement réel à lier vient désormais de la prop `events` (Agenda réel, transmise par
 // App.jsx), filtrée localement dans LinkEventPicker ci-dessous (exclusion des anniversaires,
@@ -589,39 +589,59 @@ export default function Messages({
                         <Link2 size={11} /> Lier à un événement
                       </button>
                     )}
-                    {isMine && (
-                      // Item 8 (zone tactile ≥44px, MIN_TOUCH_TARGET) TOUJOURS respecté — mais
-                      // V7.40 (25 sept.), retour direct de l'utilisatrice sur l'encombrement
-                      // visuel de cette rangée d'actions une fois "Répondre" ajouté (V7.39) :
-                      // icône SEULE désormais (bordure colorée conservée pour distinguer
-                      // Modifier/bleu de Supprimer/rouge), largeur fixée à MIN_TOUCH_TARGET au
-                      // lieu de s'étirer au texte — même zone tactile carrée de 44px, beaucoup
-                      // moins de largeur occupée (le texte du libellé reste sur aria-label/
-                      // title, jamais perdu pour l'accessibilité).
-                      <button
-                        onClick={() => setEditingMessage(m)}
-                        disabled={mutationPending}
-                        className={mutationPending ? undefined : 'tap-surface'}
-                        aria-label="Modifier ce message"
-                        title="Modifier ce message"
-                        style={{ ...buttonStyle('secondary', { compact: true }), width: MIN_TOUCH_TARGET, padding: 0, opacity: mutationPending ? 0.45 : 1 }}
-                      >
-                        <Pencil size={15} />
-                      </button>
-                    )}
-                    {(isMine || isAdmin) && (
-                      <button
-                        onClick={() => { if (!mutationPending) setConfirmingDeleteId(m.id); }}
-                        disabled={mutationPending}
-                        className={mutationPending ? undefined : 'tap-surface'}
-                        aria-label="Supprimer ce message"
-                        title={mutationPending ? 'Suppression en cours…' : 'Supprimer ce message'}
-                        style={{ ...buttonStyle('destructive', { compact: true }), width: MIN_TOUCH_TARGET, padding: 0, opacity: mutationPending ? 0.45 : 1 }}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
                   </div>
+                  {/* V7.41 (25 sept.) — retour direct de l'utilisatrice après le premier
+                      allègement (V7.40, icône seule mais toujours dans la "cartouche" bordée/
+                      fond blanc de buttonStyle) : encore jugé trop encombrant. Demande explicite
+                      et précise cette fois : plus AUCUNE cartouche (ni bordure ni fond) — icône +
+                      texte à nouveau (comme "Répondre"/"Lier à un événement", qui n'ont jamais
+                      posé problème, seul le fond/bordure de Modifier/Supprimer était visé), posés
+                      directement sur le fond crème de la page, l'un à côté de l'autre, sous la
+                      bulle, à gauche — donc dans une rangée dédiée séparée de la précédente
+                      (temps/réactions/Répondre/Lier), qui reste alignée à droite pour ses propres
+                      messages (`isMine`) : sans cette séparation, Modifier/Supprimer suivraient
+                      cette même justification à droite plutôt que de rester à gauche comme
+                      demandé. Zone tactile : toujours ≥44px (Item 8, MIN_TOUCH_TARGET) via
+                      `minHeight`/`minWidth`, même si la zone visible (icône+texte) est plus
+                      petite — le padding invisible complète la cible sans agrandir le rendu. */}
+                  {(isMine || isAdmin) && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 2 }}>
+                      {isMine && (
+                        <button
+                          onClick={() => setEditingMessage(m)}
+                          disabled={mutationPending}
+                          className={mutationPending ? undefined : 'tap-surface'}
+                          aria-label="Modifier ce message"
+                          title="Modifier ce message"
+                          style={{
+                            fontSize: 10.5, color: BLUE, background: 'none', border: 'none',
+                            display: 'flex', alignItems: 'center', gap: 3, borderRadius: 6,
+                            padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                            opacity: mutationPending ? 0.45 : 1, fontWeight: 600,
+                          }}
+                        >
+                          <Pencil size={12} /> Modifier
+                        </button>
+                      )}
+                      {(isMine || isAdmin) && (
+                        <button
+                          onClick={() => { if (!mutationPending) setConfirmingDeleteId(m.id); }}
+                          disabled={mutationPending}
+                          className={mutationPending ? undefined : 'tap-surface'}
+                          aria-label="Supprimer ce message"
+                          title={mutationPending ? 'Suppression en cours…' : 'Supprimer ce message'}
+                          style={{
+                            fontSize: 10.5, color: RED, background: 'none', border: 'none',
+                            display: 'flex', alignItems: 'center', gap: 3, borderRadius: 6,
+                            padding: '2px 4px', minHeight: MIN_TOUCH_TARGET, minWidth: 44,
+                            opacity: mutationPending ? 0.45 : 1, fontWeight: 600,
+                          }}
+                        >
+                          <Trash2 size={12} /> Supprimer
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               </div>
