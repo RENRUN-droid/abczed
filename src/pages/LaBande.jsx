@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
-import { Search, X, ChevronRight, UserPlus, Users } from 'lucide-react';
-import { INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
+import { Search, X, ChevronRight, UserPlus, Users, Check, Clock, Ban } from 'lucide-react';
+import { INK, MUTED, RED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 import { childrenOf } from '../data';
 import { anyFieldMatches } from '../searchUtils';
 import { useScrollRestore } from '../useScrollRestore';
@@ -14,9 +14,73 @@ import Avatar from '../components/Avatar';
 // côté serveur par create_invitation(), sql/09_invitations.sql — l'interface ne propose jamais
 // une action vouée à l'échec côté serveur, même principe déjà appliqué ailleurs dans ce projet,
 // ex. "Lier à un événement" dans Messages.jsx).
-export default function LaBande({ members, membersLoading, membersError, onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed, isAdmin, communityId }) {
+//
+// RÉVISION V7.46 (26 sept.) — "Inviter un parent" n'est plus réservé à l'admin (voir plus bas,
+// le bouton est désormais toujours affiché à tout membre actif). Deux nouvelles props reçues
+// depuis App.jsx, toutes deux déjà résolues/chargées là-bas (mêmes principes que
+// members/membersLoading/membersError ci-dessus, jamais une lecture directe Supabase ici) :
+//   - `pendingInvitationRequests` (admin uniquement, `[]` sinon) : demandes à trancher.
+//   - `myInvitationRequests` : les demandes DU membre courant, tous statuts confondus.
+// `onApproveInvitationRequest`/`onRejectInvitationRequest`/`onFinalizeInvitationRequest` :
+// actions réseau, tenues par App.jsx (même découpage que onRemoveMember plus bas dans ce
+// fichier) — LaBande.jsx ne fait jamais lui-même un appel réseau, uniquement déclencher l'action
+// reçue en prop et refléter le résultat déjà mis à jour par App.jsx.
+export default function LaBande({
+  members, membersLoading, membersError, onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed, isAdmin, communityId,
+  pendingInvitationRequests, myInvitationRequests, onApproveInvitationRequest, onRejectInvitationRequest, onFinalizeInvitationRequest, onReloadInvitationRequests,
+}) {
   const searchInputRef = useRef(null);
   const [showInvite, setShowInvite] = useState(false);
+  const [decidingRequestId, setDecidingRequestId] = useState(null);
+  const [finalizingRequestId, setFinalizingRequestId] = useState(null);
+  const [requestActionError, setRequestActionError] = useState('');
+  // V7.46 — le lien généré par finalize_invitation_request() n'existe QU'EN MÉMOIRE ici (jamais
+  // stocké en base en clair, voir sql/17_invitation_requests.sql) : une fois la page quittée ou
+  // rechargée, il n'est plus récupérable — comportement volontairement identique à celui que
+  // l'admin connaît déjà aujourd'hui dans InviteParentSheet.jsx (le lien n'y survit pas non plus
+  // à une fermeture de la feuille). Clé = id de la demande, valeur = lien complet déjà construit.
+  const [finalizedLinks, setFinalizedLinks] = useState({});
+  const [copiedRequestId, setCopiedRequestId] = useState(null);
+
+  async function decide(requestId, approve) {
+    if (decidingRequestId) return;
+    setDecidingRequestId(requestId);
+    setRequestActionError('');
+    try {
+      if (approve) await onApproveInvitationRequest(requestId);
+      else await onRejectInvitationRequest(requestId);
+      onReloadInvitationRequests?.();
+    } catch (err) {
+      setRequestActionError(err?.message || 'Impossible de traiter cette demande — réessaie.');
+    } finally {
+      setDecidingRequestId(null);
+    }
+  }
+
+  async function finalize(requestId) {
+    if (finalizingRequestId) return;
+    setFinalizingRequestId(requestId);
+    setRequestActionError('');
+    try {
+      const url = await onFinalizeInvitationRequest(requestId);
+      setFinalizedLinks((prev) => ({ ...prev, [requestId]: url }));
+      onReloadInvitationRequests?.();
+    } catch (err) {
+      setRequestActionError(err?.message || 'Impossible de générer le lien — réessaie.');
+    } finally {
+      setFinalizingRequestId(null);
+    }
+  }
+
+  async function copyRequestLink(requestId, url) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedRequestId(requestId);
+      setTimeout(() => setCopiedRequestId((cur) => (cur === requestId ? null : cur)), 2000);
+    } catch {
+      setRequestActionError('Copie automatique indisponible — sélectionne le lien manuellement.');
+    }
+  }
 
   // Delta §2.2/§26 : la recherche était déjà restaurée (état levé dans App.jsx) — il manquait
   // le scroll et le focus sur la carte parent d'origine.
@@ -145,21 +209,119 @@ export default function LaBande({ members, membersLoading, membersError, onOpenM
       </>
       )}
 
-      {isAdmin && (
-        <button
-          onClick={() => setShowInvite(true)}
-          style={{
-            width: '100%', marginTop: 18, padding: '13px 0', borderRadius: 14, border: `1px dashed ${SECTION_THEMES.labande.color}`,
-            background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            fontSize: 13.5, fontWeight: 700, color: SECTION_THEMES.labande.color, cursor: 'pointer', minHeight: 48,
-          }}
-        >
-          <UserPlus size={16} /> Inviter un parent
-        </button>
+      {/* V7.46 — demandes d'invitation À TRANCHER, admin uniquement. Le nom du parrain est
+          résolu depuis `members` (déjà chargé par cette page) — jamais une seconde requête
+          réseau juste pour un nom, même principe que Messages.jsx qui résout ses auteurs depuis
+          une lecture `members` déjà en mémoire plutôt qu'un aller-retour dédié. */}
+      {isAdmin && pendingInvitationRequests?.length > 0 && (
+        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: MUTED, margin: 0 }}>Demandes d'invitation en attente</p>
+          {requestActionError && (
+            <p role="alert" style={{ margin: 0, fontSize: 12, fontWeight: 600, color: RED }}>{requestActionError}</p>
+          )}
+          {pendingInvitationRequests.map((r) => {
+            const sponsor = members.find((m) => m.userId === r.sponsor_user_id);
+            const sponsorName = sponsor ? `${sponsor.firstName} ${sponsor.lastName}`.trim() : 'Un membre';
+            const busy = decidingRequestId === r.id;
+            return (
+              <div key={r.id} style={{ background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 14, padding: '12px 14px' }}>
+                <p style={{ margin: '0 0 8px', fontSize: 13.5, color: INK }}>
+                  <strong>{sponsorName}</strong> propose d'inviter {r.invited_name ? <strong>{r.invited_name}</strong> : null}
+                  {r.invited_name ? ' — ' : ''}<span style={{ color: MUTED }}>{r.invited_email}</span>
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => decide(r.id, true)} disabled={busy}
+                    style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', fontSize: 13, fontWeight: 700, minHeight: 40, background: SECTION_THEMES.labande.color, color: '#fff', opacity: busy ? 0.6 : 1 }}
+                  >
+                    Valider
+                  </button>
+                  <button
+                    onClick={() => decide(r.id, false)} disabled={busy}
+                    style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: `1px solid ${CARD_BORDER}`, fontSize: 13, fontWeight: 700, minHeight: 40, background: 'none', color: MUTED, opacity: busy ? 0.6 : 1 }}
+                  >
+                    Refuser
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
+      {/* V7.46 — suivi personnel, visible pour tout membre ayant déjà proposé au moins une
+          invitation (admin compris, s'il lui arrive de passer par ce même formulaire) — jamais
+          mélangé avec la liste ci-dessus (celle-là est TOUJOURS filtrée à l'appelant côté
+          messagesApi/invitationsApi, voir fetchMyInvitationRequests). */}
+      {myInvitationRequests?.length > 0 && (
+        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: MUTED, margin: 0 }}>Tes invitations</p>
+          {myInvitationRequests.map((r) => {
+            const link = finalizedLinks[r.id];
+            return (
+              <div key={r.id} style={{ background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 14, padding: '12px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {r.status === 'pending' && <Clock size={14} color={MUTED} />}
+                  {r.status === 'approved' && <Check size={14} color={SECTION_THEMES.labande.color} />}
+                  {r.status === 'rejected' && <Ban size={14} color={RED} />}
+                  <p style={{ margin: 0, fontSize: 13.5, color: INK, flex: 1 }}>
+                    {r.invited_name ? `${r.invited_name} — ` : ''}<span style={{ color: MUTED }}>{r.invited_email}</span>
+                  </p>
+                </div>
+                {r.status === 'pending' && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12.5, color: MUTED }}>En attente de validation par l'administrateur.</p>
+                )}
+                {r.status === 'rejected' && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12.5, color: MUTED }}>Cette demande a été refusée.</p>
+                )}
+                {r.status === 'approved' && !link && !r.invitation_id && (
+                  <button
+                    onClick={() => finalize(r.id)} disabled={finalizingRequestId === r.id}
+                    style={{ marginTop: 8, width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', fontSize: 13, fontWeight: 700, minHeight: 40, background: SECTION_THEMES.labande.color, color: '#fff', opacity: finalizingRequestId === r.id ? 0.6 : 1 }}
+                  >
+                    {finalizingRequestId === r.id ? 'Génération…' : 'Récupérer le lien à envoyer'}
+                  </button>
+                )}
+                {r.status === 'approved' && !link && r.invitation_id && (
+                  <p style={{ margin: '6px 0 0', fontSize: 12.5, color: MUTED }}>Validée — le lien a déjà été généré. Si tu ne l'as pas envoyé à temps, propose une nouvelle invitation.</p>
+                )}
+                {link && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ background: '#F1F1EF', border: `1px solid ${CARD_BORDER}`, borderRadius: 10, padding: '8px 10px' }}>
+                      <span style={{ fontSize: 12, color: INK, wordBreak: 'break-all' }}>{link}</span>
+                    </div>
+                    <button
+                      onClick={() => copyRequestLink(r.id, link)}
+                      style={{ padding: '10px 0', borderRadius: 10, border: 'none', fontSize: 13, fontWeight: 700, minHeight: 40, background: SECTION_THEMES.labande.color, color: '#fff' }}
+                    >
+                      {copiedRequestId === r.id ? 'Copié !' : 'Copier le lien'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button
+        onClick={() => setShowInvite(true)}
+        style={{
+          width: '100%', marginTop: 18, padding: '13px 0', borderRadius: 14, border: `1px dashed ${SECTION_THEMES.labande.color}`,
+          background: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          fontSize: 13.5, fontWeight: 700, color: SECTION_THEMES.labande.color, cursor: 'pointer', minHeight: 48,
+        }}
+      >
+        <UserPlus size={16} /> Inviter un parent
+      </button>
+
       {showInvite && (
-        <InviteParentSheet communityId={communityId} onClose={() => setShowInvite(false)} />
+        <InviteParentSheet
+          communityId={communityId}
+          isAdmin={isAdmin}
+          onClose={() => setShowInvite(false)}
+          onRequested={onReloadInvitationRequests}
+        />
       )}
     </div>
   );
