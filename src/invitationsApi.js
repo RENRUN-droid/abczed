@@ -47,3 +47,75 @@ export async function acceptInvitation(token, displayName) {
   const row = Array.isArray(data) ? data[0] : data;
   return row || null;
 }
+
+// ---------------------------------------------------------------------------
+// V7.46 (26 sept.) — un parent (admin ou non) propose une invitation, l'admin valide/refuse,
+// puis le PARRAIN lui-même génère et envoie le lien une fois approuvé (jamais l'admin — voir
+// sql/17_invitation_requests.sql pour le détail de ce choix). Vocabulaire d'interface volontaire
+// : ces fonctions s'appellent "invitation_requests" en base, mais Messages.jsx/InviteParentSheet.jsx
+// n'affichent jamais le mot "parrainage" — toujours "Inviter un parent", même libellé qu'avant.
+// ---------------------------------------------------------------------------
+
+// N'importe quel membre actif (admin ou non) — vérifié CÔTÉ SERVEUR par request_invitation()
+// elle-même (is_community_member), jamais seulement supposé par l'interface.
+export async function requestInvitation(communityId, email, name) {
+  const { data: requestId, error } = await supabase.rpc('request_invitation', {
+    p_community_id: communityId,
+    p_email: email.trim().toLowerCase(),
+    p_name: (name || '').trim() || null,
+  });
+  if (error) throw error;
+  return requestId;
+}
+
+// Admin uniquement (RLS : sponsor_user_id = auth.uid() OU is_community_admin ci-dessous, voir
+// sql/17) — ne renvoie ici que les demandes encore À TRANCHER, jamais l'historique déjà décidé
+// (pas utile pour l'écran de validation, qui n'a besoin que de ce qui reste à faire).
+export async function fetchPendingInvitationRequests(communityId) {
+  const { data, error } = await supabase
+    .from('invitation_requests')
+    .select('id, sponsor_user_id, invited_email, invited_name, created_at')
+    .eq('community_id', communityId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// Revérifié CÔTÉ SERVEUR par approve_invitation_request() (is_community_admin) — ne génère
+// AUCUN lien : voir le commentaire en tête de sql/17_invitation_requests.sql pour pourquoi.
+export async function approveInvitationRequest(requestId) {
+  const { error } = await supabase.rpc('approve_invitation_request', { p_request_id: requestId });
+  if (error) throw error;
+}
+
+export async function rejectInvitationRequest(requestId) {
+  const { error } = await supabase.rpc('reject_invitation_request', { p_request_id: requestId });
+  if (error) throw error;
+}
+
+// Le parrain suit SES PROPRES demandes (RLS : sponsor_user_id = auth.uid() suffit déjà, mais on
+// filtre aussi explicitement côté client — un admin qui a lui-même sponsorisé une demande ne
+// doit voir ICI que les siennes, pas confondre avec la liste globale qu'il voit par ailleurs en
+// tant qu'admin). Toutes statuts confondus (pending/approved/rejected) : le parrain doit pouvoir
+// suivre où en est sa demande, pas seulement les approuvées.
+export async function fetchMyInvitationRequests(communityId, userId) {
+  const { data, error } = await supabase
+    .from('invitation_requests')
+    .select('id, invited_email, invited_name, status, invitation_id, created_at')
+    .eq('community_id', communityId)
+    .eq('sponsor_user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Appelée par le parrain lui-même une fois sa demande approuvée — c'est le SEUL moment où le
+// jeton en clair existe, dans SA réponse à LUI (jamais celle de l'admin). Idempotente côté
+// serveur (finalize_invitation_request refuse une seconde génération) — l'appelant (App.jsx)
+// n'a donc besoin d'appeler ceci qu'une fois par demande approuvée, jamais en boucle.
+export async function finalizeInvitationRequest(requestId) {
+  const { data: token, error } = await supabase.rpc('finalize_invitation_request', { p_request_id: requestId });
+  if (error) throw error;
+  return buildInviteLink(token);
+}
