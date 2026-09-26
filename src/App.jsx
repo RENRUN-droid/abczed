@@ -37,6 +37,7 @@ import * as agendaApi from './agendaApi';
 import * as messagesApi from './messagesApi';
 // V7.18 : module dédié La Bande (annuaire réel), même principe que messagesApi.js/agendaApi.js.
 import * as membersApi from './membersApi';
+import * as invitationsApi from './invitationsApi';
 // Backlog point 4 (23 sept.) : module dédié Partages, même principe — voir le commentaire en
 // tête de src/sharesApi.js pour le détail (table/policies/bucket déjà en place, jamais branchés
 // avant ce lot).
@@ -97,6 +98,13 @@ export default function App({ activeCommunity, memberships }) {
   const [members, setMembers] = useState(MEMBERS_FROM_SUPABASE ? [] : MEMBERS);
   const [membersLoading, setMembersLoading] = useState(MEMBERS_FROM_SUPABASE);
   const [membersError, setMembersError] = useState('');
+  // V7.46 (26 sept.) — "Inviter un parent" ouvert à tout membre, validé par l'admin (voir
+  // sql/17_invitation_requests.sql, src/invitationsApi.js, src/pages/LaBande.jsx). Deux listes
+  // distinctes : `pendingInvitationRequests` (admin uniquement, `[]` sinon — jamais rempli pour
+  // un non-admin, la fonction RPC le refuserait de toute façon) et `myInvitationRequests` (le
+  // suivi personnel de CHACUN, admin compris s'il a lui-même proposé une invitation).
+  const [pendingInvitationRequests, setPendingInvitationRequests] = useState([]);
+  const [myInvitationRequests, setMyInvitationRequests] = useState([]);
   // P3 ("désactive pendant l'écriture") : géré localement dans Messages.jsx (état `sending`,
   // le temps de l'attente de la promesse renvoyée par `sendMessage` ci-dessous) — pas besoin de
   // le lever ici, Messages.jsx ne démonte jamais pendant son propre envoi (le clavier virtuel
@@ -338,6 +346,54 @@ export default function App({ activeCommunity, memberships }) {
   async function handleRemoveMember(memberId) {
     await membersApi.removeMember(memberId);
     await loadMembers();
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // V7.46 (26 sept.) — chargement des demandes d'invitation, même simplicité que loadMembers
+  // ci-dessus (pas d'ordonnanceur/Realtime, scope volontairement minimal) : au changement de
+  // communauté/rôle, PLUS à chaque fois que la vue "labande" redevient active (même second effet
+  // que loadMembers, pour la même raison — une demande tout juste créée/tranchée par quelqu'un
+  // d'autre doit apparaître sans recharger toute la page). `Promise.all` : les deux listes sont
+  // indépendantes, jamais besoin d'attendre l'une pour afficher l'autre, mais un seul indicateur
+  // de "c'est fait" suffit ici (pas d'état loading dédié — cohérent avec le fait que ces deux
+  // listes sont un complément à La Bande, jamais l'affichage principal de cette page).
+  // ---------------------------------------------------------------------------------------
+  const loadInvitationRequests = useCallback(async () => {
+    if (!communityId || !currentUserId) return;
+    try {
+      const [mine, pending] = await Promise.all([
+        invitationsApi.fetchMyInvitationRequests(communityId, currentUserId),
+        isAdmin ? invitationsApi.fetchPendingInvitationRequests(communityId) : Promise.resolve([]),
+      ]);
+      setMyInvitationRequests(mine);
+      setPendingInvitationRequests(pending);
+    } catch {
+      // Échec silencieux volontaire, même raisonnement que pushSubscribed/lastReadAt plus haut :
+      // ce chargement est un complément de La Bande, jamais bloquant pour le reste de l'écran —
+      // au pire les deux listes restent vides jusqu'au prochain passage sur la vue.
+    }
+  }, [communityId, currentUserId, isAdmin]);
+
+  useEffect(() => {
+    loadInvitationRequests();
+  }, [loadInvitationRequests]);
+
+  useEffect(() => {
+    if (view !== 'labande') return;
+    loadInvitationRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  async function handleApproveInvitationRequest(requestId) {
+    await invitationsApi.approveInvitationRequest(requestId);
+  }
+
+  async function handleRejectInvitationRequest(requestId) {
+    await invitationsApi.rejectInvitationRequest(requestId);
+  }
+
+  async function handleFinalizeInvitationRequest(requestId) {
+    return invitationsApi.finalizeInvitationRequest(requestId);
   }
 
   // V7.44 (25 sept.) — la cloche : état réel au chargement (voir commentaire sur pushSubscribed
@@ -1803,6 +1859,12 @@ export default function App({ activeCommunity, memberships }) {
                 onRestoreConsumed={() => consumeNav('labande')}
                 isAdmin={isAdmin}
                 communityId={communityId}
+                pendingInvitationRequests={pendingInvitationRequests}
+                myInvitationRequests={myInvitationRequests}
+                onApproveInvitationRequest={handleApproveInvitationRequest}
+                onRejectInvitationRequest={handleRejectInvitationRequest}
+                onFinalizeInvitationRequest={handleFinalizeInvitationRequest}
+                onReloadInvitationRequests={loadInvitationRequests}
               />
             )}
             {view === 'member-detail' && (
