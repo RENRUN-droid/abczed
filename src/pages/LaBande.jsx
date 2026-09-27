@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { Search, X, ChevronRight, UserPlus, Users, Check, Clock, Ban } from 'lucide-react';
+import { Search, X, ChevronRight, UserPlus, Users, Check, Clock, Ban, Trash2 } from 'lucide-react';
 import { INK, MUTED, RED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 import { childrenOf } from '../data';
 import { anyFieldMatches } from '../searchUtils';
 import { useScrollRestore } from '../useScrollRestore';
 import PageTitle from '../components/PageTitle';
 import InviteParentSheet from '../components/InviteParentSheet';
+import ConfirmDialog from '../components/ConfirmDialog';
 import Avatar from '../components/Avatar';
 
 // V7.18 : `members` reçu en prop (annuaire réel, App.jsx/src/membersApi.js) — remplace l'import
@@ -27,7 +28,7 @@ import Avatar from '../components/Avatar';
 // reçue en prop et refléter le résultat déjà mis à jour par App.jsx.
 export default function LaBande({
   members, membersLoading, membersError, onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed, isAdmin, communityId,
-  pendingInvitationRequests, decidedInvitationRequests, myInvitationRequests, onApproveInvitationRequest, onRejectInvitationRequest, onFinalizeInvitationRequest, onReloadInvitationRequests,
+  pendingInvitationRequests, decidedInvitationRequests, myInvitationRequests, onApproveInvitationRequest, onRejectInvitationRequest, onFinalizeInvitationRequest, onDeleteInvitationRequest, onReloadInvitationRequests,
 }) {
   const searchInputRef = useRef(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -46,6 +47,31 @@ export default function LaBande({
   // disparaissait bien de la liste "en attente", mais silencieusement — rien à l'écran ne
   // confirmait que l'action avait réussi). Message transitoire, jamais persistant.
   const [decisionFeedback, setDecisionFeedback] = useState('');
+  // V7.49 (27 sept.) — suppression réelle et PARTAGÉE d'une ligne de l'historique (demandée par
+  // l'utilisatrice pour éviter que cette liste s'allonge indéfiniment). "Partagée" : c'est la
+  // même ligne `invitation_requests` que le parrain voit dans "Tes invitations" plus bas — la
+  // supprimer ici la fait disparaître des DEUX côtés, pas seulement de cette page admin (choix
+  // explicite de l'utilisatrice, quel que soit le statut approuvé/refusé). D'où une confirmation
+  // (ConfirmDialog, patron déjà en place ailleurs dans l'app pour toute action destructrice)
+  // avant d'agir, plutôt qu'un bouton qui supprime au premier tap.
+  const [deletingRequestId, setDeletingRequestId] = useState(null);
+  const [confirmDeleteRequest, setConfirmDeleteRequest] = useState(null); // { id, label } | null
+
+  async function performDelete() {
+    if (!confirmDeleteRequest || deletingRequestId) return;
+    const { id } = confirmDeleteRequest;
+    setDeletingRequestId(id);
+    setRequestActionError('');
+    try {
+      await onDeleteInvitationRequest(id);
+      setConfirmDeleteRequest(null);
+      onReloadInvitationRequests?.();
+    } catch (err) {
+      setRequestActionError(err?.message || 'Impossible de supprimer cette entrée — réessaie.');
+    } finally {
+      setDeletingRequestId(null);
+    }
+  }
 
   async function decide(requestId, approve) {
     if (decidingRequestId) return;
@@ -283,6 +309,18 @@ export default function LaBande({
                   {r.status === 'approved' && (r.invitation_id ? ` — lien généré par ${sponsor?.firstName || sponsorName}` : ' — validée, lien pas encore récupéré')}
                   {r.status === 'rejected' && ' — refusée'}
                 </p>
+                {/* V7.49 — suppression réelle et partagée (voir le commentaire d'en-tête sur
+                    confirmDeleteRequest) : disponible quel que soit le statut (validée/refusée),
+                    exactement ce qui a été demandé. */}
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteRequest({ id: r.id, label: `${sponsorName} → ${r.invited_name || r.invited_email}` })}
+                  aria-label="Supprimer cette entrée de l'historique"
+                  className="tap-surface icon-button"
+                  style={{ background: 'none', border: 'none', flexShrink: 0, padding: 8 }}
+                >
+                  <Trash2 size={14} color={MUTED} />
+                </button>
               </div>
             );
           })}
@@ -361,6 +399,19 @@ export default function LaBande({
           isAdmin={isAdmin}
           onClose={() => setShowInvite(false)}
           onRequested={onReloadInvitationRequests}
+        />
+      )}
+
+      {confirmDeleteRequest && (
+        <ConfirmDialog
+          title="Supprimer cette entrée ?"
+          message={`"${confirmDeleteRequest.label}" disparaîtra définitivement de l'historique — y compris du suivi "Tes invitations" de la personne qui a fait la demande.`}
+          cautiousLabel="Conserver"
+          confirmLabel="Supprimer"
+          confirmBusyLabel="Suppression…"
+          busy={deletingRequestId === confirmDeleteRequest.id}
+          onCautious={() => setConfirmDeleteRequest(null)}
+          onConfirm={performDelete}
         />
       )}
     </div>
