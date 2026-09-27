@@ -74,6 +74,22 @@ export default function MyProfileSheet({ onClose, members, communityId, onMember
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState('');
   const fileInputRef = useRef(null);
+  // V7.50 (27 sept.) — jusqu'ici le nom affiché (`members.display_name`) n'était modifiable
+  // QU'UNE FOIS, au moment de l'inscription (InviteAccept.jsx) : aucun écran ne permettait de le
+  // corriger après coup. Découvert par l'utilisatrice quand Soizic s'est retrouvée affichée sous
+  // "soizic.bidet" (son identifiant de compte) plutôt qu'un prénom, dans l'historique "Inviter un
+  // parent" (V7.47/V7.49) — corrigé ponctuellement en base à l'époque (sql/19), mais rien
+  // n'empêchait le même souci de se reproduire avec le prochain parent invité. Écriture déjà
+  // couverte sans aucune nouvelle policy/grant : la policy "update_own_display_fields_or_admin"
+  // (sql/02_rls.sql) autorise déjà un membre actif à modifier SA PROPRE ligne, et le trigger
+  // protect_sensitive_member_columns (sql/01) ne bloque que community_id/user_id/role/status —
+  // jamais display_name. Même mécanisme d'écriture que le téléphone/e-mail juste en dessous
+  // (membersApi.updateMyContact), même patron d'édition en ligne (crayon → champ + Enregistrer/
+  // Annuler) que "Mes enfants" un peu plus bas dans ce fichier.
+  const [editingName, setEditingName] = useState(false);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameError, setNameError] = useState('');
 
   // Brief pt 6/45 : Escape, clic hors modale, piège de focus, et retour du focus (+ repère
   // visuel) sur l'élément qui a ouvert cette modale (l'avatar du header ou la carte "Vous" de
@@ -95,6 +111,32 @@ export default function MyProfileSheet({ onClose, members, communityId, onMember
       setAvatarError("Impossible d'enregistrer cette photo — réessaie.");
     } finally {
       setAvatarBusy(false);
+    }
+  }
+
+  function startEditName() {
+    if (!me) return;
+    setNameError('');
+    setEditDisplayName(`${me.firstName}${me.lastName ? ` ${me.lastName}` : ''}`);
+    setEditingName(true);
+  }
+
+  async function handleSaveName() {
+    if (!me || nameBusy) return;
+    const trimmed = editDisplayName.trim();
+    if (!trimmed) {
+      setNameError('Le nom affiché ne peut pas être vide.');
+      return;
+    }
+    setNameBusy(true); setNameError('');
+    try {
+      await membersApi.updateMyContact(me.rawId, { display_name: trimmed });
+      await onMemberDataChanged?.();
+      setEditingName(false);
+    } catch {
+      setNameError('Impossible d\'enregistrer — réessaie.');
+    } finally {
+      setNameBusy(false);
     }
   }
 
@@ -253,7 +295,32 @@ export default function MyProfileSheet({ onClose, members, communityId, onMember
                 </label>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>{me.firstName}{me.lastName ? ` ${me.lastName}` : ''}</div>
+                {editingName ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <input
+                      type="text" autoFocus value={editDisplayName}
+                      onChange={(e) => setEditDisplayName(e.target.value)}
+                      disabled={nameBusy}
+                      style={{ ...inputStyle, fontSize: 14 }}
+                    />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={handleSaveName} disabled={nameBusy || !editDisplayName.trim()} className="tap-surface" style={{ ...buttonStyle('primary', { compact: true }), flex: 1 }}>
+                        <Check size={15} /> {nameBusy ? 'Un instant…' : 'Enregistrer'}
+                      </button>
+                      <button type="button" onClick={() => setEditingName(false)} disabled={nameBusy} className="tap-surface" style={{ ...buttonStyle('secondary', { compact: true }), flex: 1 }}>
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700 }}>{me.firstName}{me.lastName ? ` ${me.lastName}` : ''}</div>
+                    <button type="button" onClick={startEditName} aria-label="Modifier le nom affiché" className="tap-surface icon-button" style={{ background: 'none', border: 'none', padding: 4, flexShrink: 0 }}>
+                      <Pencil size={13} color={MUTED} />
+                    </button>
+                  </div>
+                )}
+                {nameError && <p role="alert" style={{ fontSize: 12, color: RED, margin: '4px 0 0' }}>{nameError}</p>}
                 {me.avatarUrl && (
                   <button type="button" onClick={handleRemoveAvatar} disabled={avatarBusy} className="tap-surface" style={{ background: 'none', border: 'none', padding: 0, marginTop: 2, fontSize: 12.5, fontWeight: 600, color: MUTED, cursor: avatarBusy ? 'default' : 'pointer' }}>
                     {avatarBusy ? 'Un instant…' : 'Retirer la photo'}
