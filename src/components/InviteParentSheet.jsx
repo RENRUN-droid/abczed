@@ -34,7 +34,10 @@ export default function InviteParentSheet({ communityId, isAdmin, onClose, onReq
 
   async function submit(e) {
     e.preventDefault();
-    if (submitting || !email.trim()) return;
+    // V7.47 (26 sept.) — le prénom devient obligatoire pour une demande non-admin (voir
+    // sql/18_invitation_requests_followups.sql : request_invitation() le refuse désormais côté
+    // serveur si vide) — vérifié ici aussi pour un message immédiat, sans aller-retour réseau.
+    if (submitting || !email.trim() || (!isAdmin && !name.trim())) return;
     setSubmitting(true);
     setError('');
     try {
@@ -102,16 +105,17 @@ export default function InviteParentSheet({ communityId, isAdmin, onClose, onReq
                 style={{ width: '100%', boxSizing: 'border-box', minHeight: 48, padding: '10px 12px', borderRadius: 10, border: `1px solid ${CARD_BORDER}`, fontSize: 14, background: '#fff' }}
               />
             </div>
-            {/* V7.46 — champ nom optionnel, uniquement pour la demande d'un parent non-admin :
-                c'est ce qui permet à l'admin de voir clairement "qui est parrainé" dans son écran
-                de validation, pas seulement une adresse e-mail brute. Sans utilité pour le
-                parcours admin (lien généré immédiatement, aucun écran de validation à traverser),
-                donc pas affiché dans ce cas — jamais un champ inutile proposé à l'écran. */}
+            {/* V7.47 (26 sept.) — champ nom désormais OBLIGATOIRE pour la demande d'un parent
+                non-admin (était optionnel en V7.46) : sans nom, l'admin ne voit qu'une adresse
+                e-mail brute et ne peut pas juger sereinement qui elle valide — demande explicite
+                de l'utilisatrice après un premier test réel. Toujours sans utilité pour le
+                parcours admin (lien généré immédiatement, aucun écran de validation à
+                traverser), donc toujours pas affiché dans ce cas. */}
             {!isAdmin && (
               <div>
-                <label htmlFor="invite-parent-name" style={{ display: 'block', fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 4 }}>Prénom (optionnel, pour que l'administrateur sache qui c'est)</label>
+                <label htmlFor="invite-parent-name" style={{ display: 'block', fontSize: 12, fontWeight: 700, color: MUTED, marginBottom: 4 }}>Prénom (pour que l'administrateur sache qui c'est)</label>
                 <input
-                  id="invite-parent-name" type="text" autoComplete="off"
+                  id="invite-parent-name" type="text" required autoComplete="off"
                   value={name} onChange={(e) => setName(e.target.value)} disabled={submitting}
                   style={{ width: '100%', boxSizing: 'border-box', minHeight: 48, padding: '10px 12px', borderRadius: 10, border: `1px solid ${CARD_BORDER}`, fontSize: 14, background: '#fff' }}
                 />
@@ -119,7 +123,7 @@ export default function InviteParentSheet({ communityId, isAdmin, onClose, onReq
             )}
             {error && <p role="alert" style={{ margin: 0, fontSize: 12, fontWeight: 600, color: RED }}>{error}</p>}
             <button
-              type="submit" disabled={submitting || !email.trim()}
+              type="submit" disabled={submitting || !email.trim() || (!isAdmin && !name.trim())}
               style={{ marginTop: 4, padding: '13px 0', borderRadius: 14, border: 'none', fontSize: 14.5, fontWeight: 700, minHeight: 48, background: SECTION_THEMES.labande.color, color: '#fff', opacity: submitting ? 0.6 : 1 }}
             >
               {submitting ? (isAdmin ? 'Génération…' : 'Envoi…') : (isAdmin ? 'Générer le lien d’invitation' : 'Envoyer la demande')}
