@@ -276,7 +276,11 @@ export default function LaBande({
                 {r.status === 'approved' ? <Check size={13} color={SECTION_THEMES.labande.color} style={{ flexShrink: 0 }} /> : <Ban size={13} color={RED} style={{ flexShrink: 0 }} />}
                 <p style={{ margin: 0, fontSize: 12.5, color: MUTED, flex: 1 }}>
                   <strong style={{ color: INK }}>{sponsorName}</strong> → {r.invited_name ? `${r.invited_name} ` : ''}({r.invited_email})
-                  {r.status === 'approved' && (r.invitation_id ? ' — lien généré par le parrain' : ' — validée, lien pas encore récupéré')}
+                  {/* V7.47bis — "par le parrain" jugé trop froid/technique à l'usage : on affiche
+                      le prénom réel (déjà résolu juste au-dessus pour l'affichage principal de
+                      cette ligne), jamais le mot "parrain" à l'écran, comme partout ailleurs dans
+                      cette fonctionnalité. */}
+                  {r.status === 'approved' && (r.invitation_id ? ` — lien généré par ${sponsor?.firstName || sponsorName}` : ' — validée, lien pas encore récupéré')}
                   {r.status === 'rejected' && ' — refusée'}
                 </p>
               </div>
