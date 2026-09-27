@@ -105,6 +105,10 @@ export default function App({ activeCommunity, memberships }) {
   // suivi personnel de CHACUN, admin compris s'il a lui-même proposé une invitation).
   const [pendingInvitationRequests, setPendingInvitationRequests] = useState([]);
   const [myInvitationRequests, setMyInvitationRequests] = useState([]);
+  // V7.47 (26 sept.) — historique admin des demandes déjà tranchées (voir
+  // invitationsApi.fetchDecidedInvitationRequests) : demandé après le premier test réel, pour
+  // qu'une demande validée reste consultable une fois sortie de `pendingInvitationRequests`.
+  const [decidedInvitationRequests, setDecidedInvitationRequests] = useState([]);
   // P3 ("désactive pendant l'écriture") : géré localement dans Messages.jsx (état `sending`,
   // le temps de l'attente de la promesse renvoyée par `sendMessage` ci-dessous) — pas besoin de
   // le lever ici, Messages.jsx ne démonte jamais pendant son propre envoi (le clavier virtuel
@@ -361,16 +365,18 @@ export default function App({ activeCommunity, memberships }) {
   const loadInvitationRequests = useCallback(async () => {
     if (!communityId || !currentUserId) return;
     try {
-      const [mine, pending] = await Promise.all([
+      const [mine, pending, decided] = await Promise.all([
         invitationsApi.fetchMyInvitationRequests(communityId, currentUserId),
         isAdmin ? invitationsApi.fetchPendingInvitationRequests(communityId) : Promise.resolve([]),
+        isAdmin ? invitationsApi.fetchDecidedInvitationRequests(communityId) : Promise.resolve([]),
       ]);
       setMyInvitationRequests(mine);
       setPendingInvitationRequests(pending);
+      setDecidedInvitationRequests(decided);
     } catch {
       // Échec silencieux volontaire, même raisonnement que pushSubscribed/lastReadAt plus haut :
       // ce chargement est un complément de La Bande, jamais bloquant pour le reste de l'écran —
-      // au pire les deux listes restent vides jusqu'au prochain passage sur la vue.
+      // au pire les listes restent vides jusqu'au prochain passage sur la vue.
     }
   }, [communityId, currentUserId, isAdmin]);
 
@@ -1860,6 +1866,7 @@ export default function App({ activeCommunity, memberships }) {
                 isAdmin={isAdmin}
                 communityId={communityId}
                 pendingInvitationRequests={pendingInvitationRequests}
+                decidedInvitationRequests={decidedInvitationRequests}
                 myInvitationRequests={myInvitationRequests}
                 onApproveInvitationRequest={handleApproveInvitationRequest}
                 onRejectInvitationRequest={handleRejectInvitationRequest}
