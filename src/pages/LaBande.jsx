@@ -27,7 +27,7 @@ import Avatar from '../components/Avatar';
 // reçue en prop et refléter le résultat déjà mis à jour par App.jsx.
 export default function LaBande({
   members, membersLoading, membersError, onOpenMember, query, onQueryChange, restoreState, onRestoreConsumed, isAdmin, communityId,
-  pendingInvitationRequests, myInvitationRequests, onApproveInvitationRequest, onRejectInvitationRequest, onFinalizeInvitationRequest, onReloadInvitationRequests,
+  pendingInvitationRequests, decidedInvitationRequests, myInvitationRequests, onApproveInvitationRequest, onRejectInvitationRequest, onFinalizeInvitationRequest, onReloadInvitationRequests,
 }) {
   const searchInputRef = useRef(null);
   const [showInvite, setShowInvite] = useState(false);
@@ -41,6 +41,11 @@ export default function LaBande({
   // à une fermeture de la feuille). Clé = id de la demande, valeur = lien complet déjà construit.
   const [finalizedLinks, setFinalizedLinks] = useState({});
   const [copiedRequestId, setCopiedRequestId] = useState(null);
+  // V7.47 (26 sept.) — confirmation visible après Valider/Refuser : son absence a fait croire à
+  // l'utilisatrice, lors du premier test réel, que le clic n'avait rien fait (la demande
+  // disparaissait bien de la liste "en attente", mais silencieusement — rien à l'écran ne
+  // confirmait que l'action avait réussi). Message transitoire, jamais persistant.
+  const [decisionFeedback, setDecisionFeedback] = useState('');
 
   async function decide(requestId, approve) {
     if (decidingRequestId) return;
@@ -49,6 +54,8 @@ export default function LaBande({
     try {
       if (approve) await onApproveInvitationRequest(requestId);
       else await onRejectInvitationRequest(requestId);
+      setDecisionFeedback(approve ? 'Demande validée.' : 'Demande refusée.');
+      setTimeout(() => setDecisionFeedback(''), 3000);
       onReloadInvitationRequests?.();
     } catch (err) {
       setRequestActionError(err?.message || 'Impossible de traiter cette demande — réessaie.');
@@ -213,6 +220,10 @@ export default function LaBande({
           résolu depuis `members` (déjà chargé par cette page) — jamais une seconde requête
           réseau juste pour un nom, même principe que Messages.jsx qui résout ses auteurs depuis
           une lecture `members` déjà en mémoire plutôt qu'un aller-retour dédié. */}
+      {isAdmin && decisionFeedback && (
+        <p role="status" style={{ marginTop: 18, marginBottom: 0, fontSize: 13, fontWeight: 700, color: SECTION_THEMES.labande.color }}>{decisionFeedback}</p>
+      )}
+
       {isAdmin && pendingInvitationRequests?.length > 0 && (
         <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: MUTED, margin: 0 }}>Demandes d'invitation en attente</p>
@@ -243,6 +254,31 @@ export default function LaBande({
                     Refuser
                   </button>
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* V7.47 (26 sept.) — historique admin des demandes déjà tranchées, demandé après le
+          premier test réel : une demande validée disparaissait de la liste ci-dessus sans laisser
+          de trace consultable. `r.invitation_id` dit si le PARRAIN a déjà récupéré son lien
+          (finalize_invitation_request déjà appelée) — distinct de "validée" tout court, pour que
+          l'admin sache si le lien a réellement été généré, pas seulement si elle a cliqué Valider. */}
+      {isAdmin && decidedInvitationRequests?.length > 0 && (
+        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: MUTED, margin: 0 }}>Historique des demandes traitées</p>
+          {decidedInvitationRequests.map((r) => {
+            const sponsor = members.find((m) => m.userId === r.sponsor_user_id);
+            const sponsorName = sponsor ? `${sponsor.firstName} ${sponsor.lastName}`.trim() : 'Un membre';
+            return (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px' }}>
+                {r.status === 'approved' ? <Check size={13} color={SECTION_THEMES.labande.color} style={{ flexShrink: 0 }} /> : <Ban size={13} color={RED} style={{ flexShrink: 0 }} />}
+                <p style={{ margin: 0, fontSize: 12.5, color: MUTED, flex: 1 }}>
+                  <strong style={{ color: INK }}>{sponsorName}</strong> → {r.invited_name ? `${r.invited_name} ` : ''}({r.invited_email})
+                  {r.status === 'approved' && (r.invitation_id ? ' — lien généré par le parrain' : ' — validée, lien pas encore récupéré')}
+                  {r.status === 'rejected' && ' — refusée'}
+                </p>
               </div>
             );
           })}
