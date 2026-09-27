@@ -402,6 +402,11 @@ export default function App({ activeCommunity, memberships }) {
     return invitationsApi.finalizeInvitationRequest(requestId);
   }
 
+  // V7.49 (27 sept.) — suppression réelle d'une entrée de l'historique (voir invitationsApi.js).
+  async function handleDeleteInvitationRequest(requestId) {
+    await invitationsApi.deleteInvitationRequest(requestId);
+  }
+
   // V7.44 (25 sept.) — la cloche : état réel au chargement (voir commentaire sur pushSubscribed
   // ci-dessus). N'affiche jamais la cloche comme "active" par optimisme — silencieux en cas
   // d'échec (navigateur non compatible, permission déjà refusée définitivement) : la cloche
@@ -1871,6 +1876,7 @@ export default function App({ activeCommunity, memberships }) {
                 onApproveInvitationRequest={handleApproveInvitationRequest}
                 onRejectInvitationRequest={handleRejectInvitationRequest}
                 onFinalizeInvitationRequest={handleFinalizeInvitationRequest}
+                onDeleteInvitationRequest={handleDeleteInvitationRequest}
                 onReloadInvitationRequests={loadInvitationRequests}
               />
             )}
