@@ -58,11 +58,15 @@ export async function acceptInvitation(token, displayName) {
 
 // N'importe quel membre actif (admin ou non) — vérifié CÔTÉ SERVEUR par request_invitation()
 // elle-même (is_community_member), jamais seulement supposé par l'interface.
+// RÉVISION V7.47 (26 sept.) — `name` désormais OBLIGATOIRE (request_invitation() le refuse s'il
+// est vide, voir sql/18_invitation_requests_followups.sql) : sans nom, l'admin ne peut pas
+// identifier qui elle valide, seulement une adresse e-mail brute. InviteParentSheet.jsx applique
+// déjà la contrainte côté interface (champ `required`), ceci est le filet de sécurité serveur.
 export async function requestInvitation(communityId, email, name) {
   const { data: requestId, error } = await supabase.rpc('request_invitation', {
     p_community_id: communityId,
     p_email: email.trim().toLowerCase(),
-    p_name: (name || '').trim() || null,
+    p_name: (name || '').trim(),
   });
   if (error) throw error;
   return requestId;
@@ -78,6 +82,17 @@ export async function fetchPendingInvitationRequests(communityId) {
     .eq('community_id', communityId)
     .eq('status', 'pending')
     .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// V7.47 (26 sept.) — historique ADMIN des demandes déjà tranchées (validées/refusées), demandé
+// explicitement : "un raisonnement qui me permette de savoir que l'invitation a été envoyée, que
+// ça a été validé." Passe par la fonction dédiée list_decided_invitation_requests() (voir
+// sql/18_invitation_requests_followups.sql) plutôt qu'un simple select filtré côté client — même
+// revérification serveur (is_community_admin) que le reste de ce fichier.
+export async function fetchDecidedInvitationRequests(communityId) {
+  const { data, error } = await supabase.rpc('list_decided_invitation_requests', { p_community_id: communityId });
   if (error) throw error;
   return data || [];
 }
