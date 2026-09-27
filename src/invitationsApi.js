@@ -109,6 +109,17 @@ export async function rejectInvitationRequest(requestId) {
   if (error) throw error;
 }
 
+// V7.49 (27 sept.) — suppression réelle d'une demande déjà tranchée (validée/refusée), demandée
+// par l'utilisatrice pour que l'historique admin ne s'allonge pas indéfiniment. Revérifiée CÔTÉ
+// SERVEUR par delete_invitation_request() (is_community_admin + statut <> 'pending', voir
+// sql/20_delete_invitation_request.sql) : PARTAGÉE avec le parrain (même ligne que
+// fetchMyInvitationRequests ci-dessus), donc disparaît aussi de son propre suivi — voulu, pas un
+// effet de bord ignoré.
+export async function deleteInvitationRequest(requestId) {
+  const { error } = await supabase.rpc('delete_invitation_request', { p_request_id: requestId });
+  if (error) throw error;
+}
+
 // Le parrain suit SES PROPRES demandes (RLS : sponsor_user_id = auth.uid() suffit déjà, mais on
 // filtre aussi explicitement côté client — un admin qui a lui-même sponsorisé une demande ne
 // doit voir ICI que les siennes, pas confondre avec la liste globale qu'il voit par ailleurs en
