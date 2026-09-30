@@ -703,7 +703,14 @@ export default function Messages({
           >
             <Paperclip size={19} color={INK} />
           </button>
-          <div style={{ flex: 1, minHeight: 46, display: 'flex', alignItems: 'flex-end', gap: 6, background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 22, padding: '6px 12px' }}>
+          {/* V7.53 (30 sept.) — le texte ne passait pas à la ligne tout seul dans le champ malgré
+              le <textarea> (V7.52) : bug classique flexbox, `flex: 1` seul ne suffit pas, un
+              enfant flex garde par défaut une largeur minimale égale à son contenu ("min-width:
+              auto"), donc ni cette div ni le textarea n'acceptaient de rétrécir sous la largeur
+              du texte tapé — d'où le texte qui continuait tout droit au lieu de revenir à la
+              ligne. `minWidth: 0` sur les deux lève ce plancher et laisse le retour à la ligne
+              automatique (comportement par défaut d'un textarea) s'appliquer normalement. */}
+          <div style={{ flex: 1, minWidth: 0, minHeight: 46, display: 'flex', alignItems: 'flex-end', gap: 6, background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 22, padding: '6px 12px' }}>
             <textarea
               ref={composerInputRef}
               value={text}
@@ -718,7 +725,7 @@ export default function Messages({
               disabled={sending}
               rows={1}
               style={{
-                flex: 1, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent',
+                flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent',
                 font: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: composerMaxHeight,
                 padding: '4px 0', lineHeight: 1.35,
               }}
