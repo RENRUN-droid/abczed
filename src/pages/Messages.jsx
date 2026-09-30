@@ -519,13 +519,17 @@ export default function Messages({
                       rangée (temps/réactions/Répondre/Lier), au lieu d'une rangée séparée. */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                     <span style={{ fontSize: 10.5, opacity: 0.5 }}>{m.time}</span>
-                    {/* Delta pts 26-28 (arbitrage D3) : pastilles dérivées de reactionSummary,
-                        jamais du compteur brut. Taper sa PROPRE pastille la retire ; taper une
-                        pastille d'autrui y ajoute sa réaction (en remplaçant une éventuelle
-                        autre réaction déjà posée par la même personne sur ce message — une
-                        seule réaction active par personne). "Qui a réagi" : title/aria-label
-                        listent les prénoms, consultable au survol comme au clavier — pas de
-                        popover séparé pour cette liste, déjà exposée ainsi de façon accessible. */}
+                    {/* V7.54 (30 sept.) — "qui a réagi" reposait uniquement sur title/aria-label
+                        (survol souris ou lecteur d'écran) : invisible au doigt sur un
+                        téléphone, où taper la pastille ajoute/retire directement SA PROPRE
+                        réaction au lieu de révéler quoi que ce soit — aucun moyen de consulter
+                        sans risquer de réagir soi-même par erreur. Signalé par l'utilisatrice
+                        ("si je le fais en tapant sur l'emoji, ça ajoute mon emoji"). Corrigé en
+                        affichant directement les prénoms sur la pastille plutôt que le chiffre
+                        — visible d'un coup d'œil, sans aucune action requise ; groupe de taille
+                        familiale, la liste reste courte. Le tap garde exactement le même
+                        comportement qu'avant (ajoute/retire sa propre réaction) ; title/
+                        aria-label conservés pour la souris/le clavier/les lecteurs d'écran. */}
                     {reactionSummary(m.reactions, currentUserId).map((r) => (
                       <button
                         key={r.emoji}
@@ -538,9 +542,10 @@ export default function Messages({
                           minHeight: 32, fontSize: 11, borderRadius: 999, padding: '4px 9px', border: r.mine ? `1px solid ${BLUE}` : '1px solid transparent',
                           background: r.mine ? '#EAF1FB' : '#F4F0E6', color: r.mine ? BLUE : INK, fontWeight: r.mine ? 700 : 500,
                           cursor: reactionPending ? 'default' : 'pointer', opacity: reactionPending ? 0.55 : 1,
+                          maxWidth: 220,
                         }}
                       >
-                        {r.emoji} {r.count}
+                        {r.emoji} {r.people.join(', ')}
                       </button>
                     ))}
                     <span style={{ position: 'relative' }}>
