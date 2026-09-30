@@ -197,6 +197,23 @@ export default function Messages({
     if (ok) { setText(''); setReplyingTo(null); }
   }
 
+  // V7.52 (30 sept.) — le compositeur était un <input> classique : jamais de retour à la ligne,
+  // même quand le texte dépasse visuellement la largeur du champ — signalé par l'utilisatrice en
+  // testant l'envoi d'un message un peu long ("je suis obligé de faire défiler mon curseur").
+  // Remplacé par un <textarea> qui grandit avec le contenu (jusqu'à ~5 lignes, puis défilement
+  // interne), même principe que EditMessageSheet plus bas dans ce fichier mais avec une hauteur
+  // dynamique plutôt que fixe (`rows={4}`) — ce champ démarre sur UNE ligne comme avant, il ne
+  // doit pas occuper de place tant qu'on n'a rien écrit de long. Entrée envoie toujours le
+  // message (comportement inchangé) ; Maj+Entrée insère un retour à la ligne manuel (nouveau,
+  // gratuit avec un textarea — un <input> ne pouvait de toute façon jamais le faire).
+  const composerMaxHeight = 120; // ~5 lignes à cette taille de police, au-delà : défilement interne
+  useEffect(() => {
+    const el = composerInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, composerMaxHeight)}px`;
+  }, [text]);
+
   // Réutilise EXACTEMENT le mécanisme déjà en place pour les liens profonds depuis l'Accueil
   // (scroll + flash 2s, voir l'effet `highlightMessageId` plus haut) — tapoter la citation d'un
   // message ramène à son origine dans le fil, cohérent avec un comportement déjà connu du reste
@@ -686,17 +703,27 @@ export default function Messages({
           >
             <Paperclip size={19} color={INK} />
           </button>
-          <div style={{ flex: 1, minHeight: 46, display: 'flex', alignItems: 'center', gap: 6, background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 999, padding: '6px 12px' }}>
-            <input
+          <div style={{ flex: 1, minHeight: 46, display: 'flex', alignItems: 'flex-end', gap: 6, background: '#FFFFFF', border: `1px solid ${CARD_BORDER}`, borderRadius: 22, padding: '6px 12px' }}>
+            <textarea
               ref={composerInputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
               placeholder="Écrivez un message..."
               disabled={sending}
-              style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent' }}
+              rows={1}
+              style={{
+                flex: 1, border: 'none', outline: 'none', fontSize: 13.5, background: 'transparent',
+                font: 'inherit', resize: 'none', overflowY: 'auto', maxHeight: composerMaxHeight,
+                padding: '4px 0', lineHeight: 1.35,
+              }}
             />
-            <Smile size={17} color={MUTED} />
+            <Smile size={17} color={MUTED} style={{ flexShrink: 0, marginBottom: 6 }} />
           </div>
           <button
             onClick={text.trim() && !sending ? submit : undefined}
