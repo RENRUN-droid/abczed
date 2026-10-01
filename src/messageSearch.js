@@ -3,7 +3,6 @@
 
 import { anyFieldMatches } from './searchUtils.js';
 import { messageMatchesDateQuery } from './dateSearch.js';
-import { documentById } from './documents.js';
 
 // Delta pts 31-32/61 : tri défensif sur l'horodatage réel (date + heure), jamais une simple
 // confiance dans l'ordre d'arrivée du tableau — celui-ci vient de `thread`, qui peut être une
@@ -51,12 +50,12 @@ export function computeVisibleMessages(thread, linkedEvent, query, events = [], 
   const q = query || '';
   return base.filter((m) => {
     const linkedTitle = m.linkedEventId ? events.find((e) => e.id === m.linkedEventId)?.title : null;
-    // Delta pts 29/30/39/42 (arbitrage D1) : `m.file?.name` n'existe plus depuis que les
-    // pièces jointes de message référencent un id du catalogue — on résout le nom réel du
-    // fichier pour ne pas perdre ce critère de recherche (brief §21).
-    const doc = m.fileId ? documentById(m.fileId) : null;
+    // V7.61 (1er oct.) — `m.fileName` est désormais une vraie pièce jointe (messagesApi.js,
+    // trombone de Messages.jsx), plus un id de catalogue de démonstration (`m.fileId`/
+    // documentById, retiré : mort depuis que MESSAGES_FROM_SUPABASE est figé à true, voir
+    // Messages.jsx). Recherche inchangée par ailleurs (brief §21 : nom de pièce jointe).
     return (
-      anyFieldMatches([m.text, m.author, doc?.displayName, doc?.filename, linkedTitle], q) ||
+      anyFieldMatches([m.text, m.author, m.fileName, linkedTitle], q) ||
       messageMatchesDateQuery(m.date, q, todayIso)
     );
   });
