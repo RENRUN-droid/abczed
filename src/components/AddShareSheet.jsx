@@ -86,6 +86,36 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   const linkRef = useRef(null);
   const FIELD_REFS = { title: titleRef, file: fileRef, photo: photoRef, linkUrl: linkRef };
 
+  // V7.60 (1er oct.) — ergonomie signalée en recette : taper une tuile "Fichier"/"Photo" ne
+  // faisait QUE révéler le champ correspondant plus bas dans le formulaire — il fallait ensuite
+  // taper une seconde fois, sur CE champ, pour réellement ouvrir le sélecteur natif. Signalé
+  // explicitement comme pas intuitif ("il faut tout simplement cliquer sur fichier qui est en
+  // dessous"). Désormais, taper une tuile qui a besoin d'un fichier (Fichier/Photo) ouvre
+  // IMMÉDIATEMENT le sélecteur natif correspondant, sans étape intermédiaire ; taper "Lien"
+  // place directement le curseur dans son champ. `autoOpenRef` mémorise l'intention entre le
+  // clic (qui ne fait que changer `type`, donc démonte/remonte le champ concerné via
+  // AnimatedTypeFields) et l'effet ci-dessous, qui s'exécute APRÈS que React a mis à jour le DOM
+  // et donc monté le bon champ — jamais une tentative de clic synchrone sur un champ qui
+  // n'existe pas encore au moment du clic sur la tuile.
+  const autoOpenRef = useRef(null);
+  function selectType(key) {
+    setType(key);
+    // Correctif recette (23 sept.) : l'erreur d'un envoi précédent (`submitError`) restait
+    // affichée en changeant de type — comportement déjà en place avant ce lot, conservé ici.
+    setErrors({});
+    setSubmitError('');
+    if (key === 'document' || key === 'photo' || key === 'lien') {
+      autoOpenRef.current = key;
+    }
+  }
+  useEffect(() => {
+    if (autoOpenRef.current !== type) return;
+    autoOpenRef.current = null;
+    if (type === 'document') fileRef.current?.click();
+    else if (type === 'photo') photoRef.current?.click();
+    else if (type === 'lien') linkRef.current?.focus();
+  }, [type]);
+
   // V7.56 (1er oct.) puis V7.57 (1er oct., correctif du correctif) — bug réel trouvé en recette
   // (captures d'écran à l'appui) : choisir un fichier dans l'explorateur Android (ou une photo
   // dans la galerie) referme IMMÉDIATEMENT cette feuille et ramène sur la page Partages vide,
@@ -237,12 +267,9 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
             return (
               <button
                 key={t.key}
-                // Correctif recette (23 sept.) : l'erreur d'un envoi précédent (`submitError`)
-                // restait affichée en changeant de type, laissant croire à tort qu'un NOUVEL
-                // essai avait déjà échoué avant même d'avoir été tenté — `errors` (erreurs de
-                // champ) était déjà effacé ici, `submitError` (erreur d'enregistrement globale)
-                // ne l'était pas.
-                onClick={() => { setType(t.key); setErrors({}); setSubmitError(''); }}
+                // V7.60 : ouverture directe du sélecteur natif pour Fichier/Photo, focus direct
+                // pour Lien — voir `selectType`/`autoOpenRef` ci-dessus pour le détail.
+                onClick={() => selectType(t.key)}
                 aria-pressed={active}
                 style={{
                   flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
