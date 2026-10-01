@@ -97,6 +97,11 @@ export default function Messages({
   // coup via un échec d'upload.
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingFileError, setPendingFileError] = useState('');
+  // V7.63 (1er oct.) — aperçu miniature de la pièce jointe en attente (demande explicite après
+  // test réel sur le trombone V7.62 : "ça serait pas mal d'avoir un petit aperçu... plutôt que
+  // le nom du fichier"). URL locale uniquement (jamais envoyée nulle part), voir l'effet plus
+  // bas qui la crée/révoque.
+  const [pendingFilePreviewUrl, setPendingFilePreviewUrl] = useState(null);
   // V7.62 (1er oct.) — bug réel confirmé en recette (captures d'écran à l'appui) : un seul
   // champ fichier SANS attribut `accept` (V7.61) faisait afficher par Android un sélecteur à 3
   // entrées ("Appareil photo"/"Caméscope"/"Photos et vidéos"), dont la 3e — censée ouvrir la
@@ -288,6 +293,21 @@ export default function Messages({
     setPendingFile(null);
     setPendingFileError('');
   }
+
+  // V7.63 — crée l'URL locale d'aperçu (URL.createObjectURL) uniquement pour une image (même
+  // heuristique `isImageAttachment` que le rendu d'une pièce jointe déjà envoyée, plus haut
+  // dans ce fichier) ; un document garde seulement son icône, aucun aperçu n'aurait de sens.
+  // Révoquée à chaque changement de fichier ET au démontage — sinon chaque sélection/annulation
+  // répétée fuiterait un objet mémoire jamais libéré.
+  useEffect(() => {
+    if (!pendingFile || !isImageAttachment(pendingFile.name)) {
+      setPendingFilePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(pendingFile);
+    setPendingFilePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingFile]);
 
   // V7.52 (30 sept.) — le compositeur était un <input> classique : jamais de retour à la ligne,
   // même quand le texte dépasse visuellement la largeur du champ — signalé par l'utilisatrice en
@@ -807,8 +827,14 @@ export default function Messages({
             retrait (X), jamais envoyée silencieusement sans que l'utilisatrice la voie. */}
         {pendingFile && (
           <div className="max-w-md mx-auto" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#EAF1FB', border: `1px solid ${CARD_BORDER}`, borderLeft: `3px solid ${BLUE}`, borderRadius: 10, padding: '6px 10px', marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <Paperclip size={14} color={BLUE} style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              {/* V7.63 — miniature réelle si image (aperçu local, jamais uploadée en tant que
+                  tel), sinon le même trombone qu'avant pour tout autre type de fichier. */}
+              {pendingFilePreviewUrl ? (
+                <img src={pendingFilePreviewUrl} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+              ) : (
+                <Paperclip size={14} color={BLUE} style={{ flexShrink: 0 }} />
+              )}
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pendingFile.name}</div>
                 <div style={{ fontSize: 11, color: MUTED }}>{formatBytes(pendingFile.size)}</div>
