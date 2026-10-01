@@ -240,9 +240,15 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 id="ass-file"
                 ref={fileRef}
                 type="file"
-                // Types raisonnables pour un partage familial : documents courants + images
-                // (une photo scannée d'un formulaire papier reste un cas réel fréquent).
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*"
+                // V7.55 (1er oct.) — bug réel trouvé en recette (capture d'écran à l'appui) :
+                // `image/*` combiné aux extensions de documents dans ce même `accept` faisait
+                // qu'Android proposait UNIQUEMENT "Appareil photo"/"Photos et vidéos" au tap sur
+                // "Choisir un fichier" — aucun moyen d'atteindre les fichiers/téléchargements du
+                // téléphone, donc aucun PDF/Word jamais sélectionnable malgré un champ qui
+                // semblait fonctionner. Retiré : le type "Photo" (juste en dessous, bouton
+                // séparé) couvre déjà le cas d'une photo/scan, ce champ-ci n'a plus besoin
+                // d'accepter les images — seuls les documents courants restent listés.
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
                 onChange={(e) => pickFile(e.target.files, 'file')}
                 aria-invalid={errors.file ? 'true' : undefined}
                 aria-describedby={errors.file ? 'ass-error-file' : undefined}
