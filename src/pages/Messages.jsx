@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Shield, Paperclip, Smile, SmilePlus, Mic, Send, Link2, X, FileText, Search, ExternalLink, Download, Pencil, Trash2, Reply } from 'lucide-react';
+import { ArrowLeft, Shield, Paperclip, Smile, SmilePlus, Mic, Send, Link2, X, FileText, Image, Search, ExternalLink, Download, Pencil, Trash2, Reply } from 'lucide-react';
 import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 // V7.7 (P4) : `linkableEvents` (data.js, MOCK_EVENTS) n'est plus importé ici — le choix d'un
 // événement réel à lier vient désormais de la prop `events` (Agenda réel, transmise par
@@ -97,7 +97,24 @@ export default function Messages({
   // coup via un échec d'upload.
   const [pendingFile, setPendingFile] = useState(null);
   const [pendingFileError, setPendingFileError] = useState('');
-  const attachmentInputRef = useRef(null);
+  // V7.62 (1er oct.) — bug réel confirmé en recette (captures d'écran à l'appui) : un seul
+  // champ fichier SANS attribut `accept` (V7.61) faisait afficher par Android un sélecteur à 3
+  // entrées ("Appareil photo"/"Caméscope"/"Photos et vidéos"), dont la 3e — censée ouvrir la
+  // galerie — atterrissait en réalité sur un navigateur de fichiers générique (Téléchargements,
+  // dernier dossier visité), jamais sur la pellicule photo. Remplacé par DEUX champs fichier
+  // distincts, repris tels quels des deux champs DÉJÀ confirmés fonctionner sur ce même
+  // téléphone (AddShareSheet.jsx, V7.55/V7.58) : `accept` pour documents SEUL (jamais combiné à
+  // `image/*`, cause racine du tout premier bug Android confirmé, V7.55) et `accept="image/*,
+  // video/*"` SEUL pour photo/vidéo (même principe que le champ Photo de Partages, qui affiche
+  // bien le sélecteur standard appareil photo + galerie une fois `capture` retiré, V7.58).
+  // Taper le trombone ouvre un petit choix (Fichier / Photo ou vidéo, popover léger — même
+  // patron que le sélecteur de réaction plus haut, PAS une modale) plutôt que d'ouvrir
+  // directement un sélecteur unique qui ne peut plus, de toute façon, couvrir les deux à la fois
+  // sans revenir au bug ci-dessus.
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const attachMenuRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const mediaInputRef = useRef(null);
   // `dragMessageId`/`dragX` pilotent UNIQUEMENT le retour visuel pendant le glisser (décalage
   // horizontal + icône qui apparaît en fondu) — `dragRef` (une seule instance, pas un state)
   // porte l'état de geste en cours entre onPointerDown/Move/Up, jamais recréé par un re-rendu.
@@ -188,6 +205,23 @@ export default function Messages({
       document.removeEventListener('keydown', handleKey);
     };
   }, [reactionPickerFor]);
+
+  // V7.62 — même mécanisme de fermeture que le sélecteur de réaction ci-dessus (clic ailleurs
+  // ou Echap), appliqué au petit menu Fichier/Photo ou vidéo du trombone.
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    function handlePointer(e) {
+      if (attachMenuRef.current && attachMenuRef.current.contains(e.target)) return;
+      setAttachMenuOpen(false);
+    }
+    function handleKey(e) { if (e.key === 'Escape') setAttachMenuOpen(false); }
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [attachMenuOpen]);
 
   // Filet de sécurité repaint (voir le commentaire sur `listRef` ci-dessus) — déclenché à
   // chaque changement du NOMBRE de messages (envoi, suppression, ou écho Realtime d'une
@@ -791,28 +825,65 @@ export default function Messages({
           </div>
         )}
         <div className="max-w-md mx-auto" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* V7.61 — trombone activé (jusqu'ici désactivé, "Bientôt disponible"). Volontairement
-              SANS attribut `accept` sur le champ fichier ci-dessous (voir le commentaire détaillé
-              sur isImageAttachment en tête de fichier) : fichier, photo ou vidéo, toute
-              extension, l'explorateur natif complet reste accessible. Limite de taille affichée
-              honnêtement en cas de dépassement (handleAttachmentChange), jamais une sélection
-              silencieusement refusée. */}
+          {/* V7.62 (1er oct.) — trombone activé, DEUX champs fichier dédiés (voir le commentaire
+              détaillé sur `attachMenuOpen` plus haut pour le bug Android confirmé que ce
+              correctif évite) : jamais un seul champ sans `accept`, ni `image/*` combiné à des
+              extensions de documents. */}
           <input
-            ref={attachmentInputRef}
+            ref={fileInputRef}
             type="file"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
             onChange={handleAttachmentChange}
             style={{ display: 'none' }}
           />
-          <button
-            type="button"
-            onClick={() => attachmentInputRef.current?.click()}
-            title="Joindre un fichier"
-            aria-label="Joindre un fichier"
-            className="tap-surface icon-button"
-            style={{ background: 'none', border: 'none' }}
-          >
-            <Paperclip size={19} color={INK} />
-          </button>
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/*"
+            onChange={handleAttachmentChange}
+            style={{ display: 'none' }}
+          />
+          <span style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setAttachMenuOpen((v) => !v)}
+              title="Joindre un fichier"
+              aria-label="Joindre un fichier"
+              className="tap-surface icon-button"
+              style={{ background: 'none', border: 'none' }}
+            >
+              <Paperclip size={19} color={INK} />
+            </button>
+            {attachMenuOpen && (
+              <div
+                ref={attachMenuRef}
+                role="menu"
+                aria-label="Joindre"
+                style={{
+                  position: 'absolute', bottom: '120%', left: 0,
+                  display: 'flex', flexDirection: 'column', gap: 2, background: '#fff', border: `1px solid ${CARD_BORDER}`,
+                  borderRadius: 12, padding: 6, boxShadow: '0 4px 14px rgba(23,32,51,0.15)', zIndex: 5, minWidth: 170,
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setAttachMenuOpen(false); fileInputRef.current?.click(); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', borderRadius: 8, padding: '9px 10px', fontSize: 13.5, color: INK, textAlign: 'left' }}
+                >
+                  <FileText size={16} color={BLUE} /> Fichier
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setAttachMenuOpen(false); mediaInputRef.current?.click(); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', borderRadius: 8, padding: '9px 10px', fontSize: 13.5, color: INK, textAlign: 'left' }}
+                >
+                  <Image size={16} color={BLUE} /> Photo ou vidéo
+                </button>
+              </div>
+            )}
+          </span>
           {/* V7.53 (30 sept.) — le texte ne passait pas à la ligne tout seul dans le champ malgré
               le <textarea> (V7.52) : bug classique flexbox, `flex: 1` seul ne suffit pas, un
               enfant flex garde par défaut une largeur minimale égale à son contenu ("min-width:
