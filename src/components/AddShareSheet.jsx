@@ -78,7 +78,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   const [submitError, setSubmitError] = useState('');
   const [saving, setSaving] = useState(false);
   const panelRef = useRef(null);
-  const { onBackdropClick } = useModalA11y(panelRef, onClose);
+  const { onBackdropClick } = useModalA11y(panelRef, guardedOnClose);
 
   const titleRef = useRef(null);
   const fileRef = useRef(null);
@@ -86,30 +86,46 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   const linkRef = useRef(null);
   const FIELD_REFS = { title: titleRef, file: fileRef, photo: photoRef, linkUrl: linkRef };
 
-  // V7.56 (1er oct.) — bug réel trouvé en recette (captures d'écran à l'appui) : choisir un
-  // fichier dans l'explorateur Android (ou une photo dans la galerie) referme IMMÉDIATEMENT
-  // cette feuille et ramène sur la page Partages vide, sans aucune erreur — avant même d'avoir
-  // pu cliquer sur "Ajouter". Cause : au retour d'une appli externe (explorateur de fichiers/
-  // galerie) ouverte par <input type="file">, Android/Chrome WebView peut « rejouer » un clic
-  // fantôme sur la page sous-jacente à l'endroit où l'utilisatrice a tapé pour choisir son
-  // fichier — si ce point tombe sur le fond semi-transparent (visible au-dessus de la feuille,
-  // qui ne couvre que 85 % de l'écran), `onBackdropClick` l'interprète à tort comme un clic
-  // "fermer la modale" réel. Corrigé en ignorant tout clic sur le fond dans la courte fenêtre
-  // qui suit un choix de fichier/photo — un clic genuinement voulu par l'utilisatrice pour
-  // fermer la feuille n'arrive jamais aussi vite après avoir sélectionné un fichier.
-  const suppressBackdropRef = useRef(false);
-  const suppressBackdropTimerRef = useRef(null);
-  function armBackdropSuppression() {
-    suppressBackdropRef.current = true;
-    window.clearTimeout(suppressBackdropTimerRef.current);
-    suppressBackdropTimerRef.current = window.setTimeout(() => {
-      suppressBackdropRef.current = false;
-    }, 800);
+  // V7.56 (1er oct.) puis V7.57 (1er oct., correctif du correctif) — bug réel trouvé en recette
+  // (captures d'écran à l'appui) : choisir un fichier dans l'explorateur Android (ou une photo
+  // dans la galerie) referme IMMÉDIATEMENT cette feuille et ramène sur la page Partages vide,
+  // sans aucune erreur, AVANT même que le champ n'ait pu afficher le fichier choisi. V7.56
+  // armait la protection seulement dans l'`onChange` du champ fichier — trop tard : si le
+  // "clic fantôme" (rejoué par Android/Chrome WebView sur la page, à l'endroit tapé dans
+  // l'explorateur, au retour d'une appli externe ouverte par <input type="file">) ferme la
+  // feuille AVANT que le navigateur ait eu le temps de livrer l'évènement `change` au champ
+  // (le champ est alors déjà démonté), `onChange` ne se déclenche jamais et la protection
+  // n'était donc jamais armée à temps — ce qui explique que V7.56 n'ait rien changé. V7.57
+  // arme la protection dès le clic qui OUVRE le sélecteur (avant même que l'appli externe ne
+  // s'ouvre), la maintient pendant toute la durée où l'appli externe est au premier plan, et ne
+  // la relâche qu'un court instant après le retour réel sur la page (`focus`/`visibilitychange`)
+  // — fenêtre qui couvre donc tout le trajet, pas seulement l'instant du `change`. Branché
+  // directement DANS `onClose` passé à `useModalA11y` (pas seulement sur le clic du fond) pour
+  // couvrir aussi bien un clic fantôme que éventuellement une touche fantôme (Echap).
+  const suppressCloseRef = useRef(false);
+  const suppressCloseTimerRef = useRef(null);
+  function armCloseSuppression() {
+    suppressCloseRef.current = true;
   }
-  useEffect(() => () => window.clearTimeout(suppressBackdropTimerRef.current), []);
-  function handleBackdropClick(e) {
-    if (suppressBackdropRef.current) { suppressBackdropRef.current = false; return; }
-    onBackdropClick(e);
+  useEffect(() => {
+    function onPossibleReturn() {
+      if (!suppressCloseRef.current) return;
+      window.clearTimeout(suppressCloseTimerRef.current);
+      suppressCloseTimerRef.current = window.setTimeout(() => {
+        suppressCloseRef.current = false;
+      }, 1000);
+    }
+    window.addEventListener('focus', onPossibleReturn);
+    document.addEventListener('visibilitychange', onPossibleReturn);
+    return () => {
+      window.removeEventListener('focus', onPossibleReturn);
+      document.removeEventListener('visibilitychange', onPossibleReturn);
+      window.clearTimeout(suppressCloseTimerRef.current);
+    };
+  }, []);
+  function guardedOnClose() {
+    if (suppressCloseRef.current) return;
+    onClose();
   }
 
   // Révoquée à chaque remplacement de photo et au démontage — jamais de fuite mémoire sur une
@@ -207,7 +223,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   }
 
   return (
-    <div onClick={handleBackdropClick} style={{ position: 'fixed', inset: 0, background: 'rgba(23,32,51,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 60, '--section-accent': SECTION_THEMES.partages.color }}>
+    <div onClick={onBackdropClick} style={{ position: 'fixed', inset: 0, background: 'rgba(23,32,51,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 60, '--section-accent': SECTION_THEMES.partages.color }}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-label={isEditing ? 'Modifier le partage' : 'Ajouter un partage'} className="max-w-md mx-auto" style={{ width: '100%', background: '#fff', borderRadius: '20px 20px 0 0', padding: 20, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <span style={{ fontSize: 17, fontWeight: 700, fontFamily: FONT_DISPLAY }}>{isEditing ? 'Modifier le partage' : 'Ajouter un partage'}</span>
@@ -275,7 +291,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // séparé) couvre déjà le cas d'une photo/scan, ce champ-ci n'a plus besoin
                 // d'accepter les images — seuls les documents courants restent listés.
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
-                onChange={(e) => { armBackdropSuppression(); pickFile(e.target.files, 'file'); }}
+                onClick={armCloseSuppression}
+                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'file'); }}
                 aria-invalid={errors.file ? 'true' : undefined}
                 aria-describedby={errors.file ? 'ass-error-file' : undefined}
                 style={fieldStyle(errors.file)}
@@ -318,7 +335,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // existante dans la pellicule, contrairement à `capture="environment"` seul
                 // sur certains anciens navigateurs ; laissé sans valeur forcée pour ça.
                 capture="environment"
-                onChange={(e) => { armBackdropSuppression(); pickFile(e.target.files, 'photo'); }}
+                onClick={armCloseSuppression}
+                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'photo'); }}
                 aria-invalid={errors.photo ? 'true' : undefined}
                 aria-describedby={errors.photo ? 'ass-error-photo' : undefined}
                 style={fieldStyle(errors.photo)}
