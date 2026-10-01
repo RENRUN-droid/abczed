@@ -16,6 +16,48 @@ import { localIso } from './localDate.js';
 import { avatarColorFor, initialsOf } from './avatarColor.js';
 
 // ---------------------------------------------------------------------------
+// V7.61 (1er oct.) — pièce jointe réelle sur un message (trombone, Messages.jsx, jusqu'ici
+// désactivé avec "Bientôt disponible"). Même bucket Storage privé `community-files` et même
+// convention de chemin que sharesApi.js ({community_id}/{user_id}/{id}-{nom}) — un message et
+// un partage sont tous deux un dépôt de fichier par un membre dans sa communauté, voir le
+// commentaire en tête de sql/21_message_attachments.sql pour le détail. Helpers dupliqués
+// plutôt qu'importés de sharesApi.js : même raison que labelStyle/inputStyle dans
+// AddShareSheet.jsx (module dédié, pas de dépendance croisée entre modules "API" par ailleurs
+// indépendants).
+// ---------------------------------------------------------------------------
+export const MAX_MESSAGE_FILE_BYTES = 10_000_000; // ~10 Mo, même plafond que Partages
+
+const SIGNED_URL_TTL_SECONDS = 3600; // 1h — même limite connue/assumée que sharesApi.js
+
+// Correctif recette (23 sept., session Partages, même défaut probable ici) : un nom de fichier
+// réel contenant un accent et/ou une apostrophe fait échouer l'upload avec une erreur 400 côté
+// stockage Supabase. Le NOM AFFICHÉ (`messages.file_name`) reste inchangé, intact ; seul ce nom
+// TECHNIQUE, utilisé uniquement pour construire le chemin dans le bucket, est nettoyé.
+function safeStorageName(fileName) {
+  return (fileName || 'fichier')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+function storagePathFor(communityId, userId, messageId, fileName) {
+  return `${communityId}/${userId}/${messageId}-${safeStorageName(fileName)}`;
+}
+
+function formatBytes(n) {
+  if (n == null) return null;
+  if (n < 1024) return `${n} o`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`;
+  return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+async function uploadMessageFile(communityId, userId, messageId, file) {
+  const path = storagePathFor(communityId, userId, messageId, file.name);
+  const { error } = await supabase.storage.from('community-files').upload(path, file, { upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+// ---------------------------------------------------------------------------
 // P2 — Lecture réelle, auteurs résolus, réactions résolues (table normalisée
 // message_reactions, jamais la colonne historique messages.reactions).
 // ---------------------------------------------------------------------------
@@ -28,7 +70,9 @@ import { avatarColorFor, initialsOf } from './avatarColor.js';
 export async function fetchMessages(communityId) {
   const { data: rows, error } = await supabase
     .from('messages')
-    .select('id, author_id, text, linked_event_id, created_at, reply_to_id, reply_to:reply_to_id(id, text, author_id)')
+    // V7.61 — file_name/file_size/file_path : pièce jointe réelle, voir le bloc de constantes/
+    // helpers en tête de fichier et sql/21_message_attachments.sql pour le détail du schéma.
+    .select('id, author_id, text, file_name, file_size, file_path, linked_event_id, created_at, reply_to_id, reply_to:reply_to_id(id, text, author_id)')
     .eq('community_id', communityId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -81,6 +125,22 @@ export async function fetchMessages(communityId) {
     });
   }
 
+  // V7.61 — URLs signées résolues EN LOT pour tous les messages de la page (même principe que
+  // sharesApi.fetchShares : un seul aller-retour Storage, pas un par pièce jointe).
+  const pathsNeeded = rows.filter((r) => r.file_path).map((r) => r.file_path);
+  let signedUrlByPath = {};
+  if (pathsNeeded.length > 0) {
+    const { data: signed, error: signErr } = await supabase.storage
+      .from('community-files')
+      .createSignedUrls(pathsNeeded, SIGNED_URL_TTL_SECONDS);
+    if (signErr) throw signErr;
+    // Un chemin individuellement en échec ne fait jamais échouer tout le fil — url à null pour
+    // CE message seulement (même garde-fou que sharesApi.js).
+    signedUrlByPath = Object.fromEntries(
+      (signed || []).map((s) => [s.path, s.error ? null : s.signedUrl]),
+    );
+  }
+
   return rows.map((m) => {
     const displayName = displayNameOf(m.author_id);
     // `created_at` est un timestamptz (instant réel, avec fuseau) — `new Date(...)` le
@@ -106,6 +166,13 @@ export async function fetchMessages(communityId) {
       // impropres à une comparaison fiable). Jamais affiché tel quel dans l'interface.
       createdAtIso: m.created_at,
       reactions: reactionsByMessage.get(m.id) || [],
+      // V7.61 — pièce jointe réelle. `fileUrl` est `undefined` tant qu'aucun fichier n'a été
+      // joint (`file_path` null) — jamais une fausse carte vide côté Messages.jsx, qui ne
+      // rend cette pièce jointe que si `fileName` est réellement présent.
+      fileName: m.file_name,
+      fileSize: m.file_size,
+      filePath: m.file_path,
+      fileUrl: m.file_path ? (signedUrlByPath[m.file_path] ?? null) : undefined,
       linkedEventId: m.linked_event_id,
       // V7.39 — citation du message auquel celui-ci répond, déjà entièrement résolue (texte +
       // nom d'auteur) : Messages.jsx n'a qu'à l'afficher, jamais besoin de chercher le message
@@ -123,11 +190,25 @@ export async function fetchMessages(communityId) {
 // auteur : le texte normalisé (trim) est déjà appliqué ici, la validation "non vide" reste
 // côté appelant (App.jsx) pour rester la même responsabilité qu'ailleurs dans le projet.
 // ---------------------------------------------------------------------------
-export async function sendMessage(communityId, authorId, { text, linkedEventId, replyToId }) {
+// V7.61 — `file` (objet File réel, input type=file de Messages.jsx) est optionnel, `null`/
+// `undefined` pour un message sans pièce jointe (l'immense majorité). `id` généré côté client
+// (crypto.randomUUID()) — même raison que sharesApi.createShare : construire le chemin de
+// stockage AVANT l'insertion, plutôt que de dépendre d'un id renvoyé après coup par la base.
+// Texte vide autorisé UNIQUEMENT si une pièce jointe est présente (brief : une photo ou un
+// fichier peut partir sans légende) — Messages.jsx/App.jsx appliquent déjà cette règle côté
+// validation, non dupliquée ici par choix (ce module ne valide jamais, voir le reste du
+// fichier : il insère ce qu'on lui donne, la validation reste la responsabilité de l'appelant).
+export async function sendMessage(communityId, authorId, { text, linkedEventId, replyToId }, file) {
+  const id = crypto.randomUUID();
+  const filePath = file ? await uploadMessageFile(communityId, authorId, id, file) : null;
   const { error } = await supabase.from('messages').insert([{
+    id,
     community_id: communityId,
     author_id: authorId,
     text: (text || '').trim(),
+    file_name: file ? file.name : null,
+    file_size: file ? formatBytes(file.size) : null,
+    file_path: filePath,
     linked_event_id: linkedEventId || null,
     // V7.39 — voir sql/14_reponses_message.sql : un trigger serveur vérifie déjà que
     // `replyToId` (s'il est fourni) pointe vers un message de LA MÊME communauté — pas besoin
@@ -155,7 +236,12 @@ export async function updateMessageText(messageId, text) {
   }
 }
 
-export async function deleteMessage(messageId) {
+// V7.61 — `filePath` (optionnel, transmis par l'appelant depuis `thread` déjà chargé — même
+// raisonnement que sharesApi.deleteShare : pas d'aller-retour réseau supplémentaire ici pour le
+// relire). La ligne `messages` est supprimée D'ABORD (RLS = source d'autorité), le fichier
+// associé n'est retiré du bucket qu'ENSUITE, en best effort — jamais l'inverse (un fichier
+// supprimé puis un refus RLS sur la ligne laisserait une ligne orpheline pointant vers rien).
+export async function deleteMessage(messageId, filePath) {
   const { data, error } = await supabase
     .from('messages')
     .delete()
@@ -166,6 +252,9 @@ export async function deleteMessage(messageId) {
     const err = new Error("La suppression n'a pas été appliquée.");
     err.code = 'DELETE_NOT_APPLIED';
     throw err;
+  }
+  if (filePath) {
+    await supabase.storage.from('community-files').remove([filePath]).catch(() => {});
   }
 }
 
