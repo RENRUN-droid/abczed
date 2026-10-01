@@ -1083,16 +1083,27 @@ export default function App({ activeCommunity, memberships }) {
   // rien n'a été persisté". Jamais de mise à jour optimiste locale du fil : après un envoi
   // réussi, on RECHARGE l'état réel (loadMessages), qui fait foi — un message qui semblerait
   // envoyé côté interface mais rejeté côté serveur (ex. RLS) ne doit jamais rester affiché.
-  async function sendMessage({ text, linkedEventId, replyToId }) {
-    // Défense en profondeur : Messages.jsx bloque déjà l'envoi d'un texte vide/blanc côté
-    // interface (bouton désactivé), mais on ne fait pas confiance à l'appelant pour ça seul.
-    if (!(text || '').trim()) return false;
+  // V7.61 (1er oct.) — `file` (objet File réel, trombone de Messages.jsx) : le texte vide
+  // n'est plus un rejet systématique, voir le garde ci-dessous.
+  async function sendMessage({ text, linkedEventId, replyToId, file }) {
+    // Défense en profondeur : Messages.jsx bloque déjà l'envoi quand il n'y a NI texte NI
+    // pièce jointe côté interface (bouton désactivé), mais on ne fait pas confiance à
+    // l'appelant pour ça seul — une photo/un fichier SANS légende reste un envoi valide
+    // (demande explicite : "joindre un fichier/photo", jamais obligé d'écrire un texte).
+    if (!(text || '').trim() && !file) return false;
     if (!communityId || !currentUserId) {
       setMessagesError('Session invalide — reconnecte-toi.');
       return false;
     }
+    if (file && file.size > messagesApi.MAX_MESSAGE_FILE_BYTES) {
+      // Défense en profondeur également : Messages.jsx vérifie déjà la taille AVANT même
+      // d'arriver ici (dès la sélection du fichier) — jamais découvert après coup via un
+      // échec d'upload sur un gros fichier.
+      setMessagesError(`Fichier trop volumineux (maximum ${Math.round(messagesApi.MAX_MESSAGE_FILE_BYTES / 1_000_000)} Mo).`);
+      return false;
+    }
     try {
-      await messagesApi.sendMessage(communityId, currentUserId, { text, linkedEventId, replyToId });
+      await messagesApi.sendMessage(communityId, currentUserId, { text, linkedEventId, replyToId }, file);
     } catch (err) {
       // Interdiction explicite du brief : jamais une erreur réelle masquée ou transformée en
       // silence — message honnête, le texte reste dans le champ côté Messages.jsx (contrat de
@@ -1164,7 +1175,10 @@ export default function App({ activeCommunity, memberships }) {
     setMessageMutationPendingIds((prev) => new Set(prev).add(messageId));
     setMessagesError('');
     try {
-      await messagesApi.deleteMessage(messageId);
+      // V7.61 — `filePath` lu depuis `thread` déjà chargé (pas de requête réseau
+      // supplémentaire) : best-effort, nettoie le bucket si ce message avait une pièce jointe.
+      const filePath = thread.find((m) => m.id === messageId)?.filePath || null;
+      await messagesApi.deleteMessage(messageId, filePath);
       try {
         await reloadSchedulerRef.current.requestAndWait('messages', loadMessages);
       } catch {
