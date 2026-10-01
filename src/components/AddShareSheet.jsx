@@ -330,11 +330,14 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 ref={photoRef}
                 type="file"
                 accept="image/*"
-                // `capture` reste un indice pour les navigateurs mobiles (ouvre directement
-                // l'appareil photo comme option) — n'empêche jamais de choisir une photo déjà
-                // existante dans la pellicule, contrairement à `capture="environment"` seul
-                // sur certains anciens navigateurs ; laissé sans valeur forcée pour ça.
-                capture="environment"
+                // V7.58 (1er oct.) — bug réel confirmé en recette : contrairement à ce que
+                // prétendait ce commentaire, `capture="environment"` envoyait bien DIRECTEMENT
+                // à l'appareil photo sur le téléphone de l'utilisatrice, sans aucune option pour
+                // choisir une photo déjà présente dans la pellicule — `capture` n'est pas une
+                // simple suggestion, certains navigateurs/Android l'appliquent strictement.
+                // Retiré entièrement : sans cet attribut, `accept="image/*"` seul affiche le
+                // sélecteur standard (appareil photo ET galerie), laissant le choix à
+                // l'utilisatrice plutôt que de le lui imposer.
                 onClick={armCloseSuppression}
                 onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'photo'); }}
                 aria-invalid={errors.photo ? 'true' : undefined}
