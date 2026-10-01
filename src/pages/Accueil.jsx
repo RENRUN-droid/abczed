@@ -90,12 +90,13 @@ export default function Accueil({
     ? capitalize(nextBirthday._occurrence.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }))
     : '';
 
-  // Dernier message avec du texte réel (brief §7) — plus un texte figé qui ne correspondait
-  // à aucun message du fil ; on prend le vrai dernier échange, lié à son vrai identifiant.
+  // Deux derniers messages avec du texte réel (brief §7, étendu V7.59 — demande explicite de
+  // ne plus en afficher qu'UN seul ici) — plus un texte figé qui ne correspondait à aucun
+  // message du fil ; on prend les vrais derniers échanges, liés à leur vrai identifiant.
   // V7.7 (P2) : `sortMessagesChronologically` appliqué avant l'inversion — sans ça, un fil
   // rechargé (Realtime, ou après une mutation) affichait "le dernier message" comme "le message
   // le plus récemment reçu par le réseau", pas "le message au plus grand created_at réel".
-  const lastMessage = [...sortMessagesChronologically(thread)].reverse().find((m) => m.text);
+  const lastMessages = [...sortMessagesChronologically(thread)].reverse().filter((m) => m.text).slice(0, 2);
   // Deux derniers partages réels, triés par date (brief §8) — idem, plus deux libellés
   // inventés qui ne correspondaient à aucun partage existant.
   const lastShares = [...shares].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 2);
@@ -261,6 +262,51 @@ export default function Accueil({
             </Button>
           </div>
 
+          {/* V7.59 (1er oct.) — suggestion de Soizic transmise par l'utilisateur : remonter les
+              derniers partages/messages AU-DESSUS du p'tit billet, du plus récent au plus
+              ancien, limités à 2 chacun (jamais la liste complète, pour que le p'tit billet
+              reste visible sans avoir à faire défiler). Avant ce lot, ces deux blocs étaient
+              tout en bas de la page, sous Agenda/anniversaire — le p'tit billet était donc le
+              tout premier contenu rencontré, ce qui reléguait l'activité récente hors d'écran.
+              Chaque bloc restait déjà trié du plus récent au plus ancien (sortMessagesChronologically
+              inversé / tri par date décroissante pour les partages) — aucun changement de tri
+              nécessaire, seulement de position + une place de plus pour les messages (1 -> 2,
+              même plafond que les partages, voir lastMessages ci-dessus). */}
+          <SectionTitle>Derniers messages</SectionTitle>
+          {messagesError ? (
+            <div style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '8px 12px', fontSize: 12, color: '#8A2E1F' }}>
+              {messagesError}
+            </div>
+          ) : messagesLoading ? (
+            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Chargement des messages…</p>
+          ) : lastMessages.length > 0 ? (
+            lastMessages.map((m) => (
+              <Row key={m.id} id={`home-lastmessage-${m.id}`} onClick={() => onOpenMessage(m.id, `home-lastmessage-${m.id}`)}>
+                <Avatar avatarPath={m.avatarUrl} color={m.color} initials={m.initials} size={34} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5 }}><b>{m.author}</b> — {m.text}</div>
+                  {/* V7.8 (correctif) : étiquette calculée à partir de la vraie date du message
+                      (Aujourd'hui / Hier / date complète), jamais "Aujourd'hui" en dur — voir
+                      ../dateLabels.js. */}
+                  <div style={{ fontSize: 11.5, opacity: 0.55 }}>{dateSeparatorLabel(m.date)} à {m.time}</div>
+                </div>
+              </Row>
+            ))
+          ) : (
+            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Aucun message pour l'instant.</p>
+          )}
+          <SectionCTA id="home-viewall-messages" onClick={onViewAllMessages}>Voir tous les messages</SectionCTA>
+
+          {/* Derniers partages — même traitement (§4.1/§4.2). */}
+          <SectionTitle>Derniers partages</SectionTitle>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+            {lastShares.map((s) => {
+              const Icon = SHARE_ICONS[s.type] || Info;
+              return <ShareTile key={s.id} id={`home-share-${s.id}`} icon={<Icon size={16} color={s.type === 'document' ? RED : BLUE} />} label={s.title} onClick={() => onOpenShare(s.id, `home-share-${s.id}`)} />;
+            })}
+          </div>
+          <SectionCTA id="home-viewall-partages" onClick={onViewAllPartages}>Voir tous les partages</SectionCTA>
+
           {/* Le p'tit billet — V7.28 (25 sept.) : n'affiche plus jamais de texte de
               démonstration codé en dur (voir dataSourceFlags.js, BILLET_FROM_SUPABASE). Trois
               états distincts, jamais confondus (même principe que membersLoading/messagesError
@@ -372,46 +418,6 @@ export default function Accueil({
             </div>
           )}
 
-          {/* Derniers messages — titre centré (§4.1), CTA explicite SOUS le contenu (§4.2),
-              plus l'ancien petit "Tout voir" accolé au titre qui cassait le centrage.
-              V7.8 (correctif) : trois états désormais distingués, jamais confondus — chargement
-              initial, erreur réseau réelle (même style que le bandeau de Messages.jsx, jamais
-              un repli silencieux), et fil réellement vide APRÈS une lecture réussie. Avant ce
-              lot, `messagesLoading`/`messagesError` n'étaient pas transmis à cet écran : un
-              chargement en cours ou un échec réseau affichaient tous deux, à tort, le texte
-              "Aucun message pour l'instant." */}
-          <SectionTitle>Derniers messages</SectionTitle>
-          {messagesError ? (
-            <div style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '8px 12px', fontSize: 12, color: '#8A2E1F' }}>
-              {messagesError}
-            </div>
-          ) : messagesLoading ? (
-            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Chargement des messages…</p>
-          ) : lastMessage ? (
-            <Row id="home-lastmessage" onClick={() => onOpenMessage(lastMessage.id, 'home-lastmessage')}>
-              <Avatar avatarPath={lastMessage.avatarUrl} color={lastMessage.color} initials={lastMessage.initials} size={34} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5 }}><b>{lastMessage.author}</b> — {lastMessage.text}</div>
-                {/* V7.8 (correctif) : étiquette calculée à partir de la vraie date du message
-                    (Aujourd'hui / Hier / date complète), jamais "Aujourd'hui" en dur — voir
-                    ../dateLabels.js. */}
-                <div style={{ fontSize: 11.5, opacity: 0.55 }}>{dateSeparatorLabel(lastMessage.date)} à {lastMessage.time}</div>
-              </div>
-            </Row>
-          ) : (
-            <p style={{ fontSize: 13, opacity: 0.5, textAlign: 'center' }}>Aucun message pour l'instant.</p>
-          )}
-          <SectionCTA id="home-viewall-messages" onClick={onViewAllMessages}>Voir tous les messages</SectionCTA>
-
-          {/* Derniers partages — même traitement (§4.1/§4.2). */}
-          <SectionTitle>Derniers partages</SectionTitle>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-            {lastShares.map((s) => {
-              const Icon = SHARE_ICONS[s.type] || Info;
-              return <ShareTile key={s.id} id={`home-share-${s.id}`} icon={<Icon size={16} color={s.type === 'document' ? RED : BLUE} />} label={s.title} onClick={() => onOpenShare(s.id, `home-share-${s.id}`)} />;
-            })}
-          </div>
-          <SectionCTA id="home-viewall-partages" onClick={onViewAllPartages}>Voir tous les partages</SectionCTA>
         </>
       )}
     </div>
