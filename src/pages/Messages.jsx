@@ -12,8 +12,10 @@ import { useScrollRestore } from '../useScrollRestore';
 import { prefersReducedMotion } from '../motionPrefs';
 import { useModalA11y } from '../useModalA11y';
 import { reactionSummary, REACTION_EMOJIS } from '../reactions';
-import { documentById } from '../documents';
 import { openableCardProps } from '../attachmentCardA11y';
+// V7.61 (1er oct.) — trombone activé : limite de taille partagée avec messagesApi.sendMessage
+// (même valeur des deux côtés, jamais deux plafonds qui pourraient diverger).
+import { MAX_MESSAGE_FILE_BYTES } from '../messagesApi';
 import ActionButton from '../components/ActionButton';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Avatar from '../components/Avatar';
@@ -24,6 +26,25 @@ import { dateSeparatorLabel } from '../dateLabels.js';
 import { MESSAGES_FROM_SUPABASE } from '../dataSourceFlags';
 import CompactHeader from '../components/CompactHeader';
 import PageTitle from '../components/PageTitle';
+
+// V7.61 (1er oct.) — mêmes helpers que AddShareSheet.jsx (formatBytes) et même heuristique que
+// nécessaire ici spécifiquement : un message n'a qu'UN SEUL trombone (contrairement à Partages,
+// qui a des tuiles Fichier/Photo séparées) — rien ne distingue une image d'un document autre
+// que l'extension de son nom réel, utilisée uniquement pour choisir l'aperçu (miniature vs
+// carte avec icône), jamais pour restreindre la sélection elle-même (voir le champ fichier
+// plus bas : volontairement SANS attribut `accept`, pour ne pas reproduire le bug Android confirmé
+// en V7.55 — combiner `image/*` et des extensions de documents dans un même `accept` fait
+// qu'Android ne propose plus que "Appareil photo"/"Galerie", plus aucun moyen d'atteindre
+// l'explorateur de fichiers).
+function formatBytes(n) {
+  if (n == null) return '';
+  if (n < 1024) return `${n} o`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} Ko`;
+  return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+}
+function isImageAttachment(name) {
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp|svg)$/i.test(name || '');
+}
 
 export default function Messages({
   thread, onSend, onLinkMessage, onToggleReaction, onEditMessage, onDeleteMessage, linkedEvent, onBackToEvent, onExitFiltered, onOpenEventFromTag, events,
@@ -68,6 +89,15 @@ export default function Messages({
   // exactement la même chose et reste le seul moyen pour qui n'utilise pas d'écran tactile ou
   // ne découvre jamais le geste — jamais de fonctionnalité accessible uniquement par un geste.
   const [replyingTo, setReplyingTo] = useState(null);
+  // V7.61 (1er oct.) — trombone activé : fichier choisi en attente d'envoi (objet File réel),
+  // attaché au PROCHAIN message envoyé (même patron que `replyingTo` juste au-dessus — un
+  // bandeau au-dessus du compositeur, effacé seulement après un envoi réussi). `pendingFileError`
+  // distinct de `messagesError` (qui reste réservé aux échecs réseau réels) : une taille
+  // dépassée est détectée localement, AVANT toute tentative d'envoi, jamais découverte après
+  // coup via un échec d'upload.
+  const [pendingFile, setPendingFile] = useState(null);
+  const [pendingFileError, setPendingFileError] = useState('');
+  const attachmentInputRef = useRef(null);
   // `dragMessageId`/`dragX` pilotent UNIQUEMENT le retour visuel pendant le glisser (décalage
   // horizontal + icône qui apparaît en fondu) — `dragRef` (une seule instance, pas un state)
   // porte l'état de geste en cours entre onPointerDown/Move/Up, jamais recréé par un re-rendu.
@@ -189,12 +219,40 @@ export default function Messages({
   // V7.39 — `replyToId` part avec le message si une réponse était en cours d'attache ; effacé
   // seulement après un envoi RÉUSSI (`ok`), même logique que `text` juste au-dessus — un échec
   // réseau ne doit jamais faire disparaître silencieusement la citation en cours.
+  // V7.61 — un message peut désormais partir avec UNIQUEMENT une pièce jointe, sans texte
+  // (`text.trim() || pendingFile`, plus seulement `text.trim()`) — une photo n'a pas besoin de
+  // légende pour être envoyée.
   async function submit() {
-    if (!text.trim() || sending) return;
+    if ((!text.trim() && !pendingFile) || sending) return;
     setSending(true);
-    const ok = await onSend({ text: text.trim(), linkedEventId: linkedEvent ? linkedEvent.id : null, replyToId: replyingTo ? replyingTo.id : null });
+    const ok = await onSend({
+      text: text.trim(),
+      linkedEventId: linkedEvent ? linkedEvent.id : null,
+      replyToId: replyingTo ? replyingTo.id : null,
+      file: pendingFile,
+    });
     setSending(false);
-    if (ok) { setText(''); setReplyingTo(null); }
+    if (ok) { setText(''); setReplyingTo(null); setPendingFile(null); setPendingFileError(''); }
+  }
+
+  // V7.61 — sélection d'une pièce jointe. `e.target.value = ''` permet de resélectionner le
+  // MÊME fichier une seconde fois après l'avoir retiré (sinon le navigateur ne redéclenche pas
+  // `onChange` pour une sélection identique à la précédente).
+  function handleAttachmentChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > MAX_MESSAGE_FILE_BYTES) {
+      setPendingFileError(`Fichier trop volumineux (maximum ${formatBytes(MAX_MESSAGE_FILE_BYTES)}).`);
+      setPendingFile(null);
+      return;
+    }
+    setPendingFileError('');
+    setPendingFile(file);
+  }
+  function removePendingFile() {
+    setPendingFile(null);
+    setPendingFileError('');
   }
 
   // V7.52 (30 sept.) — le compositeur était un <input> classique : jamais de retour à la ligne,
@@ -476,33 +534,45 @@ export default function Messages({
                       </button>
                     )}
                     {m.text && <p style={{ fontSize: 16, margin: 0, lineHeight: 1.45, color: INK }}>{m.text}</p>}
-                    {/* Delta pts 29/30/39/42 (arbitrage D1) : `m.fileId` référence le
-                        catalogue src/documents.js — même id que l'attachement de l'événement
-                        lié et le partage correspondant quand c'est réellement le même fichier
-                        — et Ouvrir/Télécharger sont désormais réellement fonctionnels (fichier
-                        de démonstration réel, servi depuis public/demo/). */}
-                    {m.fileId && (() => {
-                      const doc = documentById(m.fileId);
-                      if (!doc) return null;
-                      return (
-                        // Précision reçue avant codage (arbitrage D1) : la carte de pièce
-                        // jointe elle-même doit être actionnable (tap mobile, hover/focus
-                        // desktop, activation clavier) — pas seulement Ouvrir/Télécharger.
-                        <div className="tap-container" {...openableCardProps(doc.url)} style={{ borderRadius: 12, padding: 4, cursor: doc.url ? 'pointer' : 'default' }}>
+                    {/* V7.61 (1er oct.) — pièce jointe RÉELLE (trombone), remplace l'ancien bloc
+                        de démonstration (`m.fileId`/src/documents.js) : mort depuis que
+                        MESSAGES_FROM_SUPABASE est figé à true (fetchMessages, messagesApi.js, ne
+                        renvoie plus jamais `fileId`). Une image (heuristique sur l'extension du
+                        nom réel, voir isImageAttachment ci-dessus) s'affiche en miniature
+                        directement ; tout autre fichier garde la carte Ouvrir/Télécharger déjà
+                        éprouvée sur Partages — même composant ActionButton, même garde-fou
+                        `openableCardProps` (carte entière actionnable, pas seulement les deux
+                        boutons). `fileUrl` peut valoir `null` (URL signée individuellement en
+                        échec, voir messagesApi.fetchMessages) : la carte reste alors affichée
+                        (nom/taille visibles) mais non actionnable — jamais un fichier qui
+                        semblerait avoir disparu. */}
+                    {m.fileName && (
+                      isImageAttachment(m.fileName) && m.fileUrl ? (
+                        <div
+                          className="tap-container"
+                          {...openableCardProps(m.fileUrl)}
+                          style={{ borderRadius: 12, overflow: 'hidden', marginTop: m.text ? 8 : 0, cursor: 'pointer' }}
+                        >
+                          <img src={m.fileUrl} alt={m.fileName} style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover' }} />
+                        </div>
+                      ) : (
+                        <div className="tap-container" {...openableCardProps(m.fileUrl)} style={{ borderRadius: 12, padding: 4, marginTop: m.text ? 8 : 0, cursor: m.fileUrl ? 'pointer' : 'default' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <FileText size={18} color={BLUE} />
                             <div>
-                              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{doc.displayName || doc.filename}</div>
-                              <div style={{ fontSize: 10.5, opacity: 0.55 }}>{doc.size}</div>
+                              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{m.fileName}</div>
+                              {m.fileSize && <div style={{ fontSize: 10.5, opacity: 0.55 }}>{m.fileSize}</div>}
                             </div>
                           </div>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                            <ActionButton icon={ExternalLink} href={doc.url} title="Ouvrir dans un nouvel onglet">Ouvrir</ActionButton>
-                            <ActionButton icon={Download} href={doc.url} download={doc.filename} title="Télécharger">Télécharger</ActionButton>
-                          </div>
+                          {m.fileUrl && (
+                            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                              <ActionButton icon={ExternalLink} href={m.fileUrl} title="Ouvrir dans un nouvel onglet">Ouvrir</ActionButton>
+                              <ActionButton icon={Download} href={m.fileUrl} download={m.fileName} title="Télécharger">Télécharger</ActionButton>
+                            </div>
+                          )}
                         </div>
-                      );
-                    })()}
+                      )
+                    )}
                   </div>
                   {/* V7.42 (25 sept.) — nouveau retour direct après capture d'écran réelle : le
                       premier essai (V7.41, deux rangées, la seconde alignée à gauche) créait en
@@ -698,13 +768,48 @@ export default function Messages({
             </button>
           </div>
         )}
+        {/* V7.61 (1er oct.) — pièce jointe en attente, même patron visuel que le bandeau
+            "Réponse à" juste au-dessus : reste collée au compositeur jusqu'à l'envoi ou le
+            retrait (X), jamais envoyée silencieusement sans que l'utilisatrice la voie. */}
+        {pendingFile && (
+          <div className="max-w-md mx-auto" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: '#EAF1FB', border: `1px solid ${CARD_BORDER}`, borderLeft: `3px solid ${BLUE}`, borderRadius: 10, padding: '6px 10px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <Paperclip size={14} color={BLUE} style={{ flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pendingFile.name}</div>
+                <div style={{ fontSize: 11, color: MUTED }}>{formatBytes(pendingFile.size)}</div>
+              </div>
+            </div>
+            <button type="button" onClick={removePendingFile} aria-label="Retirer la pièce jointe" className="tap-surface icon-button" style={{ background: 'none', border: 'none', flexShrink: 0 }}>
+              <X size={16} color={MUTED} />
+            </button>
+          </div>
+        )}
+        {pendingFileError && (
+          <div className="max-w-md mx-auto" style={{ background: '#FCE9E7', border: '1px solid #D9463033', borderRadius: 10, padding: '6px 10px', marginBottom: 8, fontSize: 12, color: '#8A2E1F' }}>
+            {pendingFileError}
+          </div>
+        )}
         <div className="max-w-md mx-auto" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* V7.61 — trombone activé (jusqu'ici désactivé, "Bientôt disponible"). Volontairement
+              SANS attribut `accept` sur le champ fichier ci-dessous (voir le commentaire détaillé
+              sur isImageAttachment en tête de fichier) : fichier, photo ou vidéo, toute
+              extension, l'explorateur natif complet reste accessible. Limite de taille affichée
+              honnêtement en cas de dépassement (handleAttachmentChange), jamais une sélection
+              silencieusement refusée. */}
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            onChange={handleAttachmentChange}
+            style={{ display: 'none' }}
+          />
           <button
-            disabled
-            title="Bientôt disponible"
-            aria-label="Joindre un fichier — bientôt disponible"
-            className="icon-button"
-            style={{ background: 'none', border: 'none', opacity: 0.35, cursor: 'not-allowed' }}
+            type="button"
+            onClick={() => attachmentInputRef.current?.click()}
+            title="Joindre un fichier"
+            aria-label="Joindre un fichier"
+            className="tap-surface icon-button"
+            style={{ background: 'none', border: 'none' }}
           >
             <Paperclip size={19} color={INK} />
           </button>
@@ -737,19 +842,21 @@ export default function Messages({
             />
             <Smile size={17} color={MUTED} style={{ flexShrink: 0, marginBottom: 6 }} />
           </div>
+          {/* V7.61 — une pièce jointe sans légende reste envoyable (même garde que `submit()`
+              ci-dessus : `text.trim() || pendingFile`, plus seulement `text.trim()`). */}
           <button
-            onClick={text.trim() && !sending ? submit : undefined}
-            disabled={!text.trim() || sending}
-            aria-label={text.trim() ? 'Envoyer le message' : 'Message vocal — bientôt disponible'}
-            title={text.trim() ? 'Envoyer' : 'Message vocal — bientôt disponible'}
+            onClick={(text.trim() || pendingFile) && !sending ? submit : undefined}
+            disabled={(!text.trim() && !pendingFile) || sending}
+            aria-label={(text.trim() || pendingFile) ? 'Envoyer le message' : 'Message vocal — bientôt disponible'}
+            title={(text.trim() || pendingFile) ? 'Envoyer' : 'Message vocal — bientôt disponible'}
             className="icon-button"
             style={{
               borderRadius: '50%', background: BLUE, border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              opacity: text.trim() && !sending ? 1 : 0.55, cursor: text.trim() && !sending ? 'pointer' : 'not-allowed',
+              opacity: (text.trim() || pendingFile) && !sending ? 1 : 0.55, cursor: (text.trim() || pendingFile) && !sending ? 'pointer' : 'not-allowed',
             }}
           >
-            {text.trim() ? <Send size={16} color="#fff" /> : <Mic size={16} color="#fff" />}
+            {(text.trim() || pendingFile) ? <Send size={16} color="#fff" /> : <Mic size={16} color="#fff" />}
           </button>
         </div>
       </div>
