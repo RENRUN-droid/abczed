@@ -241,6 +241,12 @@ export default function EventDetail({
   // (créateur ou admin, événement réellement issu de l'agenda Supabase), jamais recalculé ici
   // (une seule source de vérité pour ce calcul, cohérent avec le reste du fichier — voir
   // `isLiveEvent`/`isAdmin` dans App.jsx).
+  // V7.65 (2 oct.) — modifier un événement existant (titre/date/heure/lieu/catégorie/détails),
+  // trou signalé par Soizic relayé par l'utilisatrice ("on ne peut pas le modifier ensuite").
+  // `canEditEvent` dérivé par App.jsx EXACTEMENT comme `canDeleteEvent` juste en dessous (même
+  // condition : créateur ou admin, événement réellement issu de l'agenda Supabase) — même
+  // source de vérité, jamais recalculé ici.
+  canEditEvent, onEditEvent,
   canDeleteEvent, onDeleteEvent, deleteBusy,
   // V7.11 (P1) : en-tête compact (logo + avatar connecté) — voir src/components/CompactHeader.jsx.
   connectedUserId, connectedDisplayName, connectedAvatarPath, onOpenProfile,
@@ -777,6 +783,25 @@ export default function EventDetail({
                 }}
               >
                 <MessageCircle size={16} /> Voir la discussion liée
+              </button>
+            )}
+
+            {/* V7.65 (2 oct.) — "Modifier" : même garde que "Supprimer l'événement" juste en
+                dessous (créateur ou admin), placé AVANT elle — une action non destructive passe
+                avant une action destructive, même logique de hiérarchie que partout ailleurs
+                dans l'appli (voir le commentaire sur "Supprimer l'événement" juste en dessous).
+                Style secondaire (contour, pas plein) identique à "Voir la discussion liée"
+                au-dessus — jamais mis en avant comme l'action principale de la fiche. */}
+            {canEditEvent && (
+              <button
+                onClick={onEditEvent}
+                className="tap-surface"
+                style={{
+                  ...buttonStyle('secondary', { color: BLUE }),
+                  width: '100%',
+                }}
+              >
+                <Pencil size={15} /> Modifier l'événement
               </button>
             )}
 
