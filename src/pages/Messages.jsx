@@ -9,7 +9,7 @@ import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from
 import { TODAY_ISO } from '../data';
 import { computeVisibleMessages } from '../messageSearch';
 import { useScrollRestore } from '../useScrollRestore';
-import { prefersReducedMotion } from '../motionPrefs';
+import { prefersReducedMotion, supportsHoverPointer } from '../motionPrefs';
 import { useModalA11y } from '../useModalA11y';
 import { reactionSummary, REACTION_EMOJIS } from '../reactions';
 import { openableCardProps } from '../attachmentCardA11y';
@@ -922,8 +922,20 @@ export default function Messages({
               ref={composerInputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
+              // V7.64 (2 oct.) — bug réel signalé par l'utilisatrice : sur téléphone, taper la
+              // touche "retour" du clavier tactile envoyait le message au lieu d'aller à la
+              // ligne, parce qu'aucun clavier tactile ne peut jamais produire "Maj+Entrée" (pas
+              // de vraie touche Maj) — `!e.shiftKey` valait donc toujours vrai et Entrée
+              // déclenchait systématiquement l'envoi, quelle que soit l'intention. Corrigé en
+              // réutilisant `supportsHoverPointer()` (déjà utilisé ailleurs dans l'appli,
+              // motionPrefs.js — `(hover: hover) and (pointer: fine)`, vrai seulement pour un
+              // vrai clavier/souris) : Entrée n'envoie plus QUE sur un appareil avec clavier/
+              // souris réels (comportement desktop inchangé, Maj+Entrée toujours disponible) ;
+              // sur tactile, Entrée insère désormais une ligne, l'envoi se fait uniquement via
+              // le bouton d'envoi (bulle bleue) — même convention que la plupart des
+              // messageries mobiles.
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey && supportsHoverPointer()) {
                   e.preventDefault();
                   submit();
                 }
