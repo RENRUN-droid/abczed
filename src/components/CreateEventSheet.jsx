@@ -47,17 +47,31 @@ function ErrorText({ id, message }) {
   return <p id={id} style={{ margin: '4px 0 0', fontSize: 12, fontWeight: 600, color: RED }}>{message}</p>;
 }
 
-export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, initialCategory }) {
+// V7.65 (2 oct.) — `event`/`onUpdate` : mode modification d'un événement EXISTANT (déjà créé),
+// trou signalé par Soizic, relayé par l'utilisatrice — jusqu'ici ce formulaire ne savait que
+// créer. Réutilise le même formulaire plutôt que d'en écrire un second quasi identique : seuls
+// l'initialisation des champs (depuis `event` au lieu de vide), le texte affiché et le
+// gestionnaire appelé à la soumission changent. `event` null/absent = comportement de création
+// strictement inchangé (chemin déjà en production, aucune régression possible).
+export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, onUpdate, event, initialCategory }) {
+  const isEditing = Boolean(event);
   // Item 12 : '' est la valeur "placeholder" ('' n'est la clé d'AUCUNE vraie catégorie dans
   // CATEGORIES) — elle compte explicitement comme "aucune catégorie choisie" pour la validation
   // (item 13), jamais soumissible par accident comme le serait l'index 0 d'un vrai choix.
-  const [category, setCategory] = useState(ALL_CATEGORIES.includes(initialCategory) ? initialCategory : '');
-  const [subtype, setSubtype] = useState('sortie_parents');
-  const [title, setTitle] = useState('');
-  const [date, setDate] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [location, setLocation] = useState('');
-  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState(isEditing ? event.category : (ALL_CATEGORIES.includes(initialCategory) ? initialCategory : ''));
+  const [subtype, setSubtype] = useState(isEditing ? (event.subtype || 'sortie_parents') : 'sortie_parents');
+  const [title, setTitle] = useState(isEditing ? event.title || '' : '');
+  const [date, setDate] = useState(isEditing ? event.date || '' : '');
+  const [startTime, setStartTime] = useState(isEditing ? event.startTime || '' : '');
+  const [location, setLocation] = useState(isEditing ? event.location || '' : '');
+  const [description, setDescription] = useState(isEditing ? event.description || '' : '');
+  // V7.65 — "Anniversaire" n'est jamais proposé en mode modification : un anniversaire a une
+  // forme de données entièrement différente (jour/mois, jamais de date complète/heure/lieu) et
+  // reste modifié exclusivement via AddBirthdaySheet.jsx ; ce formulaire n'est de toute façon
+  // jamais ouvert en édition POUR un anniversaire (EventDetail.jsx ne propose "Modifier" que
+  // pour un événement standard — voir App.jsx, `onEditEvent`). Défense en profondeur côté
+  // interface, symétrique à la garde `.neq('category', 'anniversaire')` d'updateAgendaEvent.
+  const CATEGORY_OPTIONS = isEditing ? ALL_CATEGORIES.filter((k) => k !== 'anniversaire') : ALL_CATEGORIES;
   // Champs anniversaire (item 12) — mêmes trois champs, même règle, qu'AddBirthdaySheet.jsx :
   // prénom + jour + mois seulement, jamais d'année/heure/lieu.
   const [name, setName] = useState('');
@@ -126,22 +140,29 @@ export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, 
     setSaving(true);
     // Item 12 : route vers le bon gestionnaire selon la catégorie choisie — jamais le payload
     // "événement complet" pour un anniversaire (qui n'a ni date complète, ni lieu, ni heure).
+    // V7.65 — troisième branche : `isEditing` route vers `onUpdate(event.id, payload)` plutôt
+    // que `onCreate(payload)`, même forme de payload que la création (événement standard
+    // seulement — `isBirthday` ne peut de toute façon jamais être vrai en mode modification,
+    // "Anniversaire" étant exclu du sélecteur, voir CATEGORY_OPTIONS ci-dessus).
+    const payload = {
+      category,
+      subtype: category === 'sortie' ? subtype : null,
+      title: title.trim(),
+      date,
+      startTime: startTime || null,
+      location: location.trim(),
+      description: description.trim(),
+    };
     const success = isBirthday
       ? await onCreateBirthday({ title: `Anniversaire de ${name.trim()}`, day: Number(day), month: Number(month) })
-      : await onCreate({
-        category,
-        subtype: category === 'sortie' ? subtype : null,
-        title: title.trim(),
-        date,
-        startTime: startTime || null,
-        location: location.trim(),
-        description: description.trim(),
-      });
+      : isEditing
+        ? await onUpdate(event.id, payload)
+        : await onCreate(payload);
     setSaving(false);
-    // Ne ferme que si la création a réellement réussi — sinon l'échec (déjà signalé via le
-    // bandeau d'erreur d'App.jsx) se présenterait visuellement comme une fermeture normale, et
-    // la personne croirait son événement/anniversaire créé alors qu'il ne l'est pas ; le texte
-    // déjà saisi reste alors intact (état local non touché).
+    // Ne ferme que si la création/modification a réellement réussi — sinon l'échec (déjà signalé
+    // via le bandeau d'erreur d'App.jsx) se présenterait visuellement comme une fermeture
+    // normale, et la personne croirait son événement/anniversaire créé/modifié alors qu'il ne
+    // l'est pas ; le texte déjà saisi reste alors intact (état local non touché).
     if (success !== false) onClose();
   }
 
@@ -157,9 +178,9 @@ export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, 
 
   return (
     <div onClick={onBackdropClick} style={{ position: 'fixed', inset: 0, background: 'rgba(29,43,34,0.4)', display: 'flex', alignItems: 'flex-end', zIndex: 60, '--section-accent': SECTION_THEMES.agenda.color }}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Ajouter un événement" className="max-w-md mx-auto" style={{ width: '100%', background: '#fff', borderRadius: '20px 20px 0 0', padding: 20, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label={isEditing ? 'Modifier l’événement' : 'Ajouter un événement'} className="max-w-md mx-auto" style={{ width: '100%', background: '#fff', borderRadius: '20px 20px 0 0', padding: 20, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <span style={{ fontSize: 17, fontWeight: 700, fontFamily: FONT_DISPLAY }}>Ajouter un événement</span>
+          <span style={{ fontSize: 17, fontWeight: 700, fontFamily: FONT_DISPLAY }}>{isEditing ? 'Modifier l’événement' : 'Ajouter un événement'}</span>
           <button onClick={onClose} aria-label="Fermer" className="tap-surface icon-button" style={{ background: 'none', border: 'none' }}><X size={20} /></button>
         </div>
 
@@ -181,7 +202,7 @@ export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, 
                 style={{ ...fieldStyle(errors.category), appearance: 'none', paddingRight: 36, cursor: 'pointer' }}
               >
                 <option value="" disabled>Choisir une catégorie</option>
-                {ALL_CATEGORIES.map((key) => (
+                {CATEGORY_OPTIONS.map((key) => (
                   <option key={key} value={key}>{CATEGORY_OPTION_LABELS[key]}</option>
                 ))}
               </select>
@@ -316,7 +337,9 @@ export default function CreateEventSheet({ onClose, onCreate, onCreateBirthday, 
               opacity: saving ? 0.6 : 1, cursor: saving ? 'default' : 'pointer',
             }}
           >
-            {saving ? 'Création…' : isBirthday ? 'Ajouter l’anniversaire' : 'Créer l’événement'}
+            {saving
+              ? (isEditing ? 'Enregistrement…' : 'Création…')
+              : isBirthday ? 'Ajouter l’anniversaire' : isEditing ? 'Enregistrer' : 'Créer l’événement'}
           </button>
         </div>
       </div>
