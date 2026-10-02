@@ -171,6 +171,43 @@ export async function createAgendaEvent(communityId, userId, { category, subtype
   return { id: data?.id };
 }
 
+// V7.65 (2 oct.) — modifier un événement existant (titre/date/heure/lieu/catégorie/détails),
+// jusqu'ici strictement impossible côté application : seule la suppression existait
+// (deleteAgendaEvent plus bas), alors que la policy RLS update_own_event_or_admin
+// (sql/02_rls.sql) autorise déjà cette écriture côté serveur depuis le début — trou signalé par
+// Soizic, relayé par l'utilisatrice ("quand on crée un événement on ne peut pas le modifier
+// ensuite... tu crois que tu peux faire quelque chose"). Même patron que updateAgendaBirthday
+// juste en dessous (écriture + vérification explicite qu'une ligne a réellement été touchée —
+// PostgREST ne lève pas d'erreur pour un UPDATE qui ne touche aucune ligne). `.neq('category',
+// 'anniversaire')` — garde symétrique à celle d'updateAgendaBirthday — empêche cette fonction de
+// toucher par erreur un anniversaire, dont la forme de données est entièrement différente
+// (jour/mois, jamais de date complète/heure/lieu) et reste modifié exclusivement par
+// updateAgendaBirthday ; CreateEventSheet.jsx n'offre de toute façon pas "Anniversaire" dans le
+// sélecteur de catégorie quand ce formulaire est ouvert en mode modification (défense en
+// profondeur, pas la seule garde).
+export async function updateAgendaEvent(eventId, { category, subtype, title, date, startTime, location, description }) {
+  const { data, error } = await supabase
+    .from('events')
+    .update({
+      category,
+      subtype: category === 'sortie' ? subtype : null,
+      title,
+      date,
+      start_time: startTime || null,
+      location,
+      description,
+    })
+    .eq('id', eventId)
+    .neq('category', 'anniversaire')
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    const err = new Error("La modification n'a pas été appliquée.");
+    err.code = 'UPDATE_NOT_APPLIED';
+    throw err;
+  }
+}
+
 // Brief §20 : un anniversaire n'est pas un événement standard — prénom + jour + mois
 // seulement, jamais d'année, d'heure, de lieu ni de RSVP. Insertion basée sur le schéma
 // documenté dans sql/02_rls.sql (table events, lignes ~26-47 : colonnes birthday_day/
