@@ -129,6 +129,11 @@ export default function App({ activeCommunity, memberships }) {
   const [toastMessage, setToastMessage] = useState('');
   const [showAddBirthday, setShowAddBirthday] = useState(false);
   const [editingBirthday, setEditingBirthday] = useState(null);
+  // V7.65 (2 oct.) — modifier un événement standard existant (pas un anniversaire, voir
+  // editingBirthday juste au-dessus) : même patron, l'événement ciblé lui-même (pas seulement
+  // son id) sert à la fois de condition d'ouverture (CreateEventSheet rouvert en mode
+  // modification quand non-null) et de pré-remplissage des champs.
+  const [editingEvent, setEditingEvent] = useState(null);
   const [showAddShare, setShowAddShare] = useState(false);
   const [showMyProfile, setShowMyProfile] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState(null);
@@ -1332,6 +1337,23 @@ export default function App({ activeCommunity, memberships }) {
     return true;
   }
 
+  // V7.65 (2 oct.) — modification d'un événement existant, symétrique à handleUpdateBirthday
+  // plus bas (même contrat pessimiste : écriture réelle PUIS rechargement de l'état réel, jamais
+  // de mise à jour optimiste locale de `events`) — comble le trou signalé par Soizic, relayé par
+  // l'utilisatrice : jusqu'ici, seule la suppression existait après la création d'un événement.
+  async function handleUpdateEvent(eventId, payload) {
+    try {
+      await agendaApi.updateAgendaEvent(eventId, payload);
+    } catch {
+      setDataError("La modification de l'événement a échoué — réessaie.");
+      return false;
+    }
+    await reloadAgendaOrWarn(
+      "L'événement a été modifié mais l'actualisation a échoué — réessaie ou recharge la page.",
+    );
+    return true;
+  }
+
   // Brief §20 : chemin de création dédié, symétrique à handleCreateEvent mais jamais mélangé
   // avec lui — un anniversaire n'est pas un événement standard (pas de subtype, pas de date
   // complète, pas de lieu). Non vérifié sur le vrai schéma Supabase (voir agendaApi.js) :
@@ -1778,6 +1800,15 @@ export default function App({ activeCommunity, memberships }) {
                 // de sens, il n'existe pas côté serveur) ET seulement à son créateur ou à un
                 // admin de la communauté (dérivé du rôle réel, `isAdmin`, jamais deviné côté
                 // interface — voir le commentaire sur `isAdmin` en tête de ce fichier).
+                // V7.65 (2 oct.) — "Modifier l'événement" : EXACTEMENT la même garde que
+                // `canDeleteEvent` juste en dessous (créateur ou admin, événement réellement issu
+                // de l'agenda Supabase) — même raisonnement, même source de vérité.
+                canEditEvent={Boolean(
+                  isLiveEvent(selectedEvent?.id)
+                  && currentUserId
+                  && (isAdmin || selectedEventWithThreadFlag?.createdBy === currentUserId),
+                )}
+                onEditEvent={() => setEditingEvent(selectedEventWithThreadFlag)}
                 canDeleteEvent={Boolean(
                   isLiveEvent(selectedEvent?.id)
                   && currentUserId
@@ -1906,15 +1937,21 @@ export default function App({ activeCommunity, memberships }) {
           </>
         )}
 
-        {showCreate && (
+        {(showCreate || editingEvent) && (
           <CreateEventSheet
-            onClose={() => setShowCreate(false)}
+            key={editingEvent?.id || 'new-event'}
+            onClose={() => { setShowCreate(false); setEditingEvent(null); }}
             onCreate={handleCreateEvent}
             // V7.14 (points 12-14) : formulaire unifié, 'anniversaire' y est désormais créable
             // au même titre que les trois autres catégories (voir le commentaire en tête de
             // CreateEventSheet.jsx pour la décision produit qui remplace l'ancienne règle
             // verrouillée) — routage vers le bon gestionnaire selon la catégorie choisie.
             onCreateBirthday={handleCreateBirthday}
+            // V7.65 (2 oct.) — `event` non-null bascule ce même formulaire en mode modification
+            // (voir le commentaire en tête de CreateEventSheet.jsx) : pré-rempli depuis
+            // l'événement ciblé, soumission routée vers `onUpdate` plutôt que `onCreate`.
+            event={editingEvent}
+            onUpdate={handleUpdateEvent}
             // 'tous' -> pas de présélection ; les quatre autres filtres présélectionnent
             // désormais leur propre catégorie (anniversaire inclus).
             initialCategory={['sortie', 'ecole', 'autre', 'anniversaire'].includes(agendaFilter) ? agendaFilter : undefined}
