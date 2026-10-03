@@ -17,6 +17,11 @@ export function AuthProvider({ children }) {
   // Empêche une réponse de requête "membership" obsolète (utilisateur déjà déconnecté ou
   // reconnecté entre-temps) d'écraser un état plus récent.
   const requestId = useRef(0);
+  // V7.69 (3 oct.) — voir le correctif détaillé plus bas (onAuthStateChange) : identifie
+  // l'utilisateur de la session en cours, lu dans la fermeture de l'écouteur SANS dépendre de
+  // l'état React `session` (qui serait figé à sa valeur du montage dans cette fermeture,
+  // l'effet ci-dessous n'ayant qu'une seule dépendance stable `loadMemberships`).
+  const sessionUserIdRef = useRef(null);
 
   const loadMemberships = useCallback(async (currentSession) => {
     const myRequestId = ++requestId.current;
@@ -77,12 +82,36 @@ export function AuthProvider({ children }) {
       // été appelé avec succès.
       if (event === 'PASSWORD_RECOVERY') {
         setSession(newSession);
+        sessionUserIdRef.current = newSession?.user?.id || null;
         requestId.current++; // annule toute vérification de membership encore en vol
         setError('');
         setStatus('password-recovery');
         return;
       }
+
+      // V7.69 (3 oct.) — bug réel trouvé grâce à un journal de diagnostic (feuilles Partages/
+      // Agenda/etc. qui se fermaient TOUTES SEULES, sans raison apparente, en particulier au
+      // retour d'une appli externe comme le sélecteur de fichier Android) : le SDK Supabase
+      // rafraîchit automatiquement le jeton de connexion à chaque fois que l'onglet redevient
+      // visible (événement `TOKEN_REFRESHED`), ce qui redéclenche CET écouteur. Avant ce
+      // correctif, CHAQUE occurrence relançait `loadMemberships` qui repasse `status` à
+      // 'authenticated-checking-membership' — Root.jsx remplace alors TOUT l'arbre React par
+      // l'écran de chargement le temps de la vérification, ce qui démonte n'importe quelle
+      // feuille ouverte (AddShareSheet, CreateEventSheet, …) SANS jamais appeler son `onClose` —
+      // d'où l'absence totale d'erreur et l'apparence d'une fermeture "par magie". Un simple
+      // changement d'appli sur le téléphone, un écran qui s'éteint puis se rallume, ou le retour
+      // du sélecteur de fichier natif suffisaient à déclencher ça.
+      // Le correctif : un rafraîchissement de jeton pour le MÊME utilisateur déjà vérifié ne
+      // doit mettre à jour QUE la session, en silence — jamais remettre `status` en chantier. Un
+      // vrai changement d'utilisateur (connexion/déconnexion/nouvelle session) continue de
+      // déclencher la vérification complète, exactement comme avant.
+      const isSameUserTokenRefresh =
+        event === 'TOKEN_REFRESHED' && newSession?.user?.id && newSession.user.id === sessionUserIdRef.current;
+      sessionUserIdRef.current = newSession?.user?.id || null;
       setSession(newSession);
+      if (isSameUserTokenRefresh) {
+        return;
+      }
       if (newSession) {
         loadMemberships(newSession);
       } else {
