@@ -1,11 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { selectActiveCommunity } from './selectActiveCommunity';
-// V7.70 (3 oct.) — journal de diagnostic temporaire (voir ../debugLog.js), le temps de
-// confirmer que le correctif ci-dessous couvre bien l'événement réel renvoyé par Supabase au
-// retour sur l'app. À retirer une fois le bug "une feuille ouverte se ferme toute seule"
-// corrigé et confirmé.
-import { logDebug } from '../debugLog';
 
 const AuthContext = createContext(null);
 
@@ -121,7 +116,6 @@ export function AuthProvider({ children }) {
       // Un vrai changement d'utilisateur (connexion/déconnexion/nouvelle session, ou un premier
       // chargement) continue de déclencher la vérification complète, exactement comme avant.
       const isAlreadyCheckedUser = newSession?.user?.id && newSession.user.id === checkedUserIdRef.current;
-      logDebug('auth_event', { event, hasSession: Boolean(newSession), skipped: Boolean(isAlreadyCheckedUser) });
       setSession(newSession);
       if (isAlreadyCheckedUser) {
         return;
