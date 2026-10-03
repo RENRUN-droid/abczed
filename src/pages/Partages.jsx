@@ -266,6 +266,24 @@ export default function Partages({
                   {s.type === 'photo' && (
                     <p style={{ fontSize: 12.5, color: MUTED, margin: '6px 0 0' }}>{s.photoCount} photo{s.photoCount > 1 ? 's' : ''}</p>
                   )}
+                  {/* V7.72 (3 oct.) — miniature réelle de la photo partagée, ajoutée suite à une
+                      remarque utilisatrice : sans elle, un partage de type "photo" ne se
+                      distinguait visuellement en rien d'un partage "info" — aucun indice qu'il y
+                      a quelque chose à voir. Même principe que la miniature d'image déjà affichée
+                      dans Messages.jsx (V7.61, isImageAttachment) : <img> direct, sans action ni
+                      gestionnaire propres — la carte entière porte déjà
+                      openableCardProps(cardHref) avec cardHref = s.photoDataUrl pour ce type (voir
+                      plus haut), donc cliquer la miniature ouvre déjà la photo via ce mécanisme
+                      existant ; lui ajouter son propre onClick aurait déclenché l'ouverture deux
+                      fois (même piège déjà évité pour l'icône de carte, "Item 9" plus haut).
+                      `s.photoDataUrl` peut valoir `undefined` (URL signée en échec, voir
+                      sharesApi.js) : la miniature ne s'affiche alors simplement pas, jamais une
+                      image cassée. */}
+                  {s.type === 'photo' && s.photoDataUrl && (
+                    <div style={{ borderRadius: 12, overflow: 'hidden', marginTop: 8, maxWidth: 220 }}>
+                      <img src={s.photoDataUrl} alt={s.title} style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover' }} />
+                    </div>
+                  )}
                   {s.type === 'lien' && (
                     <p style={{ fontSize: 12.5, color: BLUE, margin: '6px 0 0' }}>{s.domain}</p>
                   )}
