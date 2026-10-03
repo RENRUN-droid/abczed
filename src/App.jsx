@@ -1455,9 +1455,7 @@ export default function App({ activeCommunity, memberships }) {
         await sharesApi.createShare(communityId, currentUserId, payload, file);
       }
     } catch (err) {
-      // V7.71 (3 oct.) — diagnostic temporaire (détail technique affiché à l'écran, à retirer
-      // une fois la cause du bug "partage photo" trouvée et corrigée).
-      return { ok: false, error: `Le partage n'a pas pu être enregistré — réessaie. (détail : ${err?.message || String(err)})` };
+      return { ok: false, error: "Le partage n'a pas pu être enregistré — réessaie." };
     }
     try {
       // Même raisonnement que sendMessage (P1, ordonnanceur partagé 'shares') — voir le
