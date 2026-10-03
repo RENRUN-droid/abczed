@@ -307,6 +307,27 @@ export default function Accueil({
           </div>
           <SectionCTA id="home-viewall-partages" onClick={onViewAllPartages}>Voir tous les partages</SectionCTA>
 
+          {/* Prochain événement — titre centré (§4.1), pas de CTA (§4.3 : l'Agenda existe déjà
+              comme destination complète). V7.66 (3 oct.) : remonté au même niveau que Derniers
+              messages/Derniers partages, au-dessus du p'tit billet — même logique que le
+              réordonnancement V7.59 ci-dessus (l'activité récente/à venir prime sur le billet). */}
+          {nextEvent && (
+            <>
+              <SectionTitle>Prochain événement</SectionTitle>
+              <Row id={`home-nextevent-${nextEvent.id}`} onClick={() => onOpenEvent(nextEvent.id, `home-nextevent-${nextEvent.id}`)}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: categoryOf(nextEvent).tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <CalendarDays size={16} color={categoryOf(nextEvent).color} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{nextEvent.title}</div>
+                  <div style={{ fontSize: 12, opacity: 0.6 }}>
+                    {fmtShortDate(nextEvent.date)}{nextEvent.startTime ? ` à ${nextEvent.startTime}` : ''}{nextEvent.location ? ` · ${nextEvent.location}` : ''}
+                  </div>
+                </div>
+              </Row>
+            </>
+          )}
+
           {/* Le p'tit billet — V7.28 (25 sept.) : n'affiche plus jamais de texte de
               démonstration codé en dur (voir dataSourceFlags.js, BILLET_FROM_SUPABASE). Trois
               états distincts, jamais confondus (même principe que membersLoading/messagesError
@@ -385,25 +406,6 @@ export default function Accueil({
                   </Row>
                 );
               })}
-            </>
-          )}
-
-          {/* Prochain événement — titre centré (§4.1), pas de CTA (§4.3 : l'Agenda existe déjà
-              comme destination complète). */}
-          {nextEvent && (
-            <>
-              <SectionTitle>Prochain événement</SectionTitle>
-              <Row id={`home-nextevent-${nextEvent.id}`} onClick={() => onOpenEvent(nextEvent.id, `home-nextevent-${nextEvent.id}`)}>
-                <div style={{ width: 34, height: 34, borderRadius: 9, background: categoryOf(nextEvent).tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <CalendarDays size={16} color={categoryOf(nextEvent).color} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600 }}>{nextEvent.title}</div>
-                  <div style={{ fontSize: 12, opacity: 0.6 }}>
-                    {fmtShortDate(nextEvent.date)}{nextEvent.startTime ? ` à ${nextEvent.startTime}` : ''}{nextEvent.location ? ` · ${nextEvent.location}` : ''}
-                  </div>
-                </div>
-              </Row>
             </>
           )}
 
