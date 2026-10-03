@@ -4,9 +4,6 @@ import { RED, MUTED, CARD_BORDER, SHARE_TYPE_THEMES, SECTION_THEMES, FONT_DISPLA
 import { useModalA11y } from '../useModalA11y';
 import { isValidAbsoluteUrl } from '../urlValidation';
 import { MAX_SHARE_FILE_BYTES } from '../sharesApi';
-// V7.68 (3 oct.) — journal de diagnostic temporaire pour le bug "la feuille se ferme au choix
-// d'un fichier" (voir ../debugLog.js) : retiré une fois le bug réellement corrigé et confirmé.
-import { logDebug } from '../debugLog';
 
 const TYPES = [
   { key: 'document', label: 'Fichier', icon: FileText },
@@ -102,7 +99,6 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   // n'existe pas encore au moment du clic sur la tuile.
   const autoOpenRef = useRef(null);
   function selectType(key) {
-    logDebug('tile_tap', { key });
     setType(key);
     // Correctif recette (23 sept.) : l'erreur d'un envoi précédent (`submitError`) restait
     // affichée en changeant de type — comportement déjà en place avant ce lot, conservé ici.
@@ -115,8 +111,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   useEffect(() => {
     if (autoOpenRef.current !== type) return;
     autoOpenRef.current = null;
-    if (type === 'document') { logDebug('native_picker_click', { field: 'file' }); fileRef.current?.click(); }
-    else if (type === 'photo') { logDebug('native_picker_click', { field: 'photo' }); photoRef.current?.click(); }
+    if (type === 'document') { fileRef.current?.click(); }
+    else if (type === 'photo') { photoRef.current?.click(); }
     else if (type === 'lien') linkRef.current?.focus();
   }, [type]);
 
@@ -139,20 +135,10 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   const suppressCloseRef = useRef(false);
   const suppressCloseTimerRef = useRef(null);
   function armCloseSuppression() {
-    logDebug('suppress_armed');
     suppressCloseRef.current = true;
   }
   useEffect(() => {
-    // V7.68 : journal à chaque mont/démont de la feuille — si elle se démonte SANS qu'un
-    // "close_allowed" n'ait été loggé juste avant, c'est qu'autre chose que guardedOnClose l'a
-    // fermée (ex. l'appli entière rechargée par Android — voir aussi le marqueur app_boot de
-    // debugLog.js).
-    logDebug('sheet_mounted');
-    return () => logDebug('sheet_unmounted');
-  }, []);
-  useEffect(() => {
-    function onPossibleReturn(e) {
-      logDebug('return_event', { type: e.type, visibilityState: document.visibilityState, suppressed: suppressCloseRef.current });
+    function onPossibleReturn() {
       if (!suppressCloseRef.current) return;
       // V7.69 (3 oct.) — bug réel trouvé grâce au journal de diagnostic : cette fonction
       // s'exécute aussi bien quand la page devient CACHÉE (en partant vers le sélecteur de
@@ -165,7 +151,6 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
       if (document.visibilityState === 'hidden') return;
       window.clearTimeout(suppressCloseTimerRef.current);
       suppressCloseTimerRef.current = window.setTimeout(() => {
-        logDebug('suppress_released');
         suppressCloseRef.current = false;
       }, 1000);
     }
@@ -178,9 +163,7 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
     };
   }, []);
   function guardedOnClose() {
-    logDebug('close_attempt', { suppressed: suppressCloseRef.current });
     if (suppressCloseRef.current) return;
-    logDebug('close_allowed');
     onClose();
   }
 
@@ -348,8 +331,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // séparé) couvre déjà le cas d'une photo/scan, ce champ-ci n'a plus besoin
                 // d'accepter les images — seuls les documents courants restent listés.
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
-                onClick={() => { logDebug('file_input_click', { field: 'file' }); armCloseSuppression(); }}
-                onChange={(e) => { logDebug('file_input_change', { field: 'file', count: e.target.files?.length || 0, name: e.target.files?.[0]?.name || null }); armCloseSuppression(); pickFile(e.target.files, 'file'); }}
+                onClick={() => { armCloseSuppression(); }}
+                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'file'); }}
                 aria-invalid={errors.file ? 'true' : undefined}
                 aria-describedby={errors.file ? 'ass-error-file' : undefined}
                 style={fieldStyle(errors.file)}
@@ -395,8 +378,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // Retiré entièrement : sans cet attribut, `accept="image/*"` seul affiche le
                 // sélecteur standard (appareil photo ET galerie), laissant le choix à
                 // l'utilisatrice plutôt que de le lui imposer.
-                onClick={() => { logDebug('file_input_click', { field: 'photo' }); armCloseSuppression(); }}
-                onChange={(e) => { logDebug('file_input_change', { field: 'photo', count: e.target.files?.length || 0, name: e.target.files?.[0]?.name || null }); armCloseSuppression(); pickFile(e.target.files, 'photo'); }}
+                onClick={() => { armCloseSuppression(); }}
+                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'photo'); }}
                 aria-invalid={errors.photo ? 'true' : undefined}
                 aria-describedby={errors.photo ? 'ass-error-photo' : undefined}
                 style={fieldStyle(errors.photo)}
