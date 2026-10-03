@@ -250,7 +250,15 @@ export default function Partages({
                     // Item 9 (révisé) : même raison que l'icône ci-dessus — plus de
                     // openableCardProps propre ici, la carte entière porte déjà la même action.
                     <p
-                      style={{ fontSize: 12.5, color: shareDoc(s)?.url ? BLUE : MUTED, margin: '6px 0 0', cursor: shareDoc(s)?.url ? 'pointer' : 'default', display: 'inline-block' }}
+                      // V7.67 (3 oct.) — corrigé : bug réel signalé par capture d'écran, un
+                      // nom de fichier long sans espaces (uniquement des "_") débordait du
+                      // cadre de la carte au lieu de passer à la ligne — `display:
+                      // inline-block` sans largeur contrainte laisse un élément s'étendre à
+                      // la largeur de son contenu, et le CSS par défaut ne coupe qu'aux
+                      // espaces/traits d'union, jamais aux "_". `overflowWrap: anywhere`
+                      // autorise la coupure n'importe où en dernier recours, `maxWidth: 100%`
+                      // force réellement la contrainte de largeur du parent.
+                      style={{ fontSize: 12.5, color: shareDoc(s)?.url ? BLUE : MUTED, margin: '6px 0 0', cursor: shareDoc(s)?.url ? 'pointer' : 'default', maxWidth: '100%', overflowWrap: 'anywhere' }}
                     >
                       {shareDoc(s)?.filename} · {shareDoc(s)?.size}
                     </p>
