@@ -154,6 +154,15 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
     function onPossibleReturn(e) {
       logDebug('return_event', { type: e.type, visibilityState: document.visibilityState, suppressed: suppressCloseRef.current });
       if (!suppressCloseRef.current) return;
+      // V7.69 (3 oct.) — bug réel trouvé grâce au journal de diagnostic : cette fonction
+      // s'exécute aussi bien quand la page devient CACHÉE (en partant vers le sélecteur de
+      // fichier) que quand elle redevient VISIBLE (au retour) — `visibilitychange` se déclenche
+      // dans les deux sens. Avant ce correctif, le décompte d'1 seconde démarrait dès le départ
+      // (page cachée), donc la protection tombait PENDANT que le sélecteur de fichier natif
+      // était encore ouvert, bien avant le retour réel — l'inverse de l'intention du
+      // commentaire V7.57 ci-dessus. Ne démarrer le décompte qu'au retour réel (page de nouveau
+      // visible, ou focus de la fenêtre) couvre désormais tout le trajet comme prévu.
+      if (document.visibilityState === 'hidden') return;
       window.clearTimeout(suppressCloseTimerRef.current);
       suppressCloseTimerRef.current = window.setTimeout(() => {
         logDebug('suppress_released');
@@ -274,7 +283,11 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
       <div ref={panelRef} role="dialog" aria-modal="true" aria-label={isEditing ? 'Modifier le partage' : 'Ajouter un partage'} className="max-w-md mx-auto" style={{ width: '100%', background: '#fff', borderRadius: '20px 20px 0 0', padding: 20, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <span style={{ fontSize: 17, fontWeight: 700, fontFamily: FONT_DISPLAY }}>{isEditing ? 'Modifier le partage' : 'Ajouter un partage'}</span>
-          <button onClick={onClose} aria-label="Fermer" className="tap-surface icon-button" style={{ background: 'none', border: 'none' }}><X size={20} /></button>
+          {/* V7.69 (3 oct.) — corrigé : ce bouton appelait `onClose` directement, en
+              contournant entièrement `guardedOnClose` et donc la protection anti-fermeture
+              fantôme (V7.56/57) — un clic fantôme replayé par Android pile sur ce bouton
+              n'aurait jamais été bloqué. Même garde que partout ailleurs sur cette feuille. */}
+          <button onClick={guardedOnClose} aria-label="Fermer" className="tap-surface icon-button" style={{ background: 'none', border: 'none' }}><X size={20} /></button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginBottom: 16 }}>
