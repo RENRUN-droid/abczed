@@ -1,6 +1,11 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { selectActiveCommunity } from './selectActiveCommunity';
+// V7.70 (3 oct.) — journal de diagnostic temporaire (voir ../debugLog.js), le temps de
+// confirmer que le correctif ci-dessous couvre bien l'événement réel renvoyé par Supabase au
+// retour sur l'app. À retirer une fois le bug "une feuille ouverte se ferme toute seule"
+// corrigé et confirmé.
+import { logDebug } from '../debugLog';
 
 const AuthContext = createContext(null);
 
@@ -17,11 +22,12 @@ export function AuthProvider({ children }) {
   // Empêche une réponse de requête "membership" obsolète (utilisateur déjà déconnecté ou
   // reconnecté entre-temps) d'écraser un état plus récent.
   const requestId = useRef(0);
-  // V7.69 (3 oct.) — voir le correctif détaillé plus bas (onAuthStateChange) : identifie
-  // l'utilisateur de la session en cours, lu dans la fermeture de l'écouteur SANS dépendre de
-  // l'état React `session` (qui serait figé à sa valeur du montage dans cette fermeture,
-  // l'effet ci-dessous n'ayant qu'une seule dépendance stable `loadMemberships`).
-  const sessionUserIdRef = useRef(null);
+  // V7.70 (3 oct.) — voir le correctif détaillé plus bas (onAuthStateChange). Mémorise
+  // l'utilisateur pour lequel le membership a déjà été vérifié AVEC SUCCÈS (données reçues,
+  // qu'il y ait accès ou non) — lu dans la fermeture de l'écouteur SANS dépendre de l'état React
+  // `session`/`status` (figés à leur valeur du montage dans cette fermeture, l'effet ci-dessous
+  // n'ayant qu'une seule dépendance stable `loadMemberships`).
+  const checkedUserIdRef = useRef(null);
 
   const loadMemberships = useCallback(async (currentSession) => {
     const myRequestId = ++requestId.current;
@@ -48,6 +54,9 @@ export function AuthProvider({ children }) {
     if (myRequestId !== requestId.current) return; // réponse obsolète, ignorée
 
     if (err) {
+      // V7.70 : PAS de checkedUserIdRef ici (échec réel, ex. réseau) — un prochain événement
+      // pour ce même utilisateur doit pouvoir réessayer la vérification, jamais rester bloqué
+      // sur un échec silencieusement répété.
       setError('Impossible de vérifier votre accès pour le moment. Réessayez.');
       setMemberships([]);
       setActiveCommunity(null);
@@ -55,6 +64,10 @@ export function AuthProvider({ children }) {
       return;
     }
 
+    // V7.70 (3 oct.) : réponse reçue avec succès (accès accordé ou non, peu importe) — marque
+    // cet utilisateur comme "déjà vérifié" pour que l'écouteur ci-dessous puisse ignorer les
+    // événements ultérieurs qui le concernent sans tout rejouer.
+    checkedUserIdRef.current = currentSession.user.id;
     setMemberships(data || []);
     if (!data || data.length === 0) {
       setActiveCommunity(null);
@@ -82,39 +95,41 @@ export function AuthProvider({ children }) {
       // été appelé avec succès.
       if (event === 'PASSWORD_RECOVERY') {
         setSession(newSession);
-        sessionUserIdRef.current = newSession?.user?.id || null;
+        checkedUserIdRef.current = null; // force une vraie revérification après ce parcours
         requestId.current++; // annule toute vérification de membership encore en vol
         setError('');
         setStatus('password-recovery');
         return;
       }
 
-      // V7.69 (3 oct.) — bug réel trouvé grâce à un journal de diagnostic (feuilles Partages/
-      // Agenda/etc. qui se fermaient TOUTES SEULES, sans raison apparente, en particulier au
-      // retour d'une appli externe comme le sélecteur de fichier Android) : le SDK Supabase
-      // rafraîchit automatiquement le jeton de connexion à chaque fois que l'onglet redevient
-      // visible (événement `TOKEN_REFRESHED`), ce qui redéclenche CET écouteur. Avant ce
-      // correctif, CHAQUE occurrence relançait `loadMemberships` qui repasse `status` à
-      // 'authenticated-checking-membership' — Root.jsx remplace alors TOUT l'arbre React par
-      // l'écran de chargement le temps de la vérification, ce qui démonte n'importe quelle
-      // feuille ouverte (AddShareSheet, CreateEventSheet, …) SANS jamais appeler son `onClose` —
-      // d'où l'absence totale d'erreur et l'apparence d'une fermeture "par magie". Un simple
-      // changement d'appli sur le téléphone, un écran qui s'éteint puis se rallume, ou le retour
-      // du sélecteur de fichier natif suffisaient à déclencher ça.
-      // Le correctif : un rafraîchissement de jeton pour le MÊME utilisateur déjà vérifié ne
-      // doit mettre à jour QUE la session, en silence — jamais remettre `status` en chantier. Un
-      // vrai changement d'utilisateur (connexion/déconnexion/nouvelle session) continue de
-      // déclencher la vérification complète, exactement comme avant.
-      const isSameUserTokenRefresh =
-        event === 'TOKEN_REFRESHED' && newSession?.user?.id && newSession.user.id === sessionUserIdRef.current;
-      sessionUserIdRef.current = newSession?.user?.id || null;
+      // V7.69/V7.70 (3 oct.) — bug réel trouvé grâce à un journal de diagnostic (feuilles
+      // Partages/Agenda/etc. qui se fermaient TOUTES SEULES, sans raison apparente, en
+      // particulier au retour d'une appli externe comme le sélecteur de fichier Android) : le
+      // SDK Supabase redéclenche CET écouteur à chaque fois que l'onglet redevient visible —
+      // avec `TOKEN_REFRESHED` dans certains cas, mais l'observation réelle (second journal,
+      // après un premier correctif ciblant seulement `TOKEN_REFRESHED` qui n'a rien changé)
+      // montre qu'un AUTRE événement rejoue la même chose au retour (vraisemblablement
+      // `SIGNED_IN` republié par le SDK). Plutôt que de deviner tous les noms d'événements
+      // possibles, le correctif V7.70 ignore la cause et regarde l'EFFET : si l'utilisateur de
+      // la nouvelle session est celui déjà vérifié avec succès (`checkedUserIdRef`), on met
+      // simplement `session` à jour en silence, quel que soit l'événement — jamais remettre
+      // `status` en chantier pour un utilisateur déjà connu. Sans ça, `loadMemberships` repasse
+      // `status` à 'authenticated-checking-membership', Root.jsx remplace alors TOUT l'arbre
+      // React par l'écran de chargement le temps de la vérification, ce qui démonte n'importe
+      // quelle feuille ouverte (AddShareSheet, CreateEventSheet, …) SANS jamais appeler son
+      // `onClose` — d'où l'absence totale d'erreur et l'apparence d'une fermeture "par magie".
+      // Un vrai changement d'utilisateur (connexion/déconnexion/nouvelle session, ou un premier
+      // chargement) continue de déclencher la vérification complète, exactement comme avant.
+      const isAlreadyCheckedUser = newSession?.user?.id && newSession.user.id === checkedUserIdRef.current;
+      logDebug('auth_event', { event, hasSession: Boolean(newSession), skipped: Boolean(isAlreadyCheckedUser) });
       setSession(newSession);
-      if (isSameUserTokenRefresh) {
+      if (isAlreadyCheckedUser) {
         return;
       }
       if (newSession) {
         loadMemberships(newSession);
       } else {
+        checkedUserIdRef.current = null;
         requestId.current++; // annule toute vérification de membership encore en vol
         setMemberships([]);
         setActiveCommunity(null);
