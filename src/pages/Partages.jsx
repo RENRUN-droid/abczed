@@ -9,10 +9,6 @@ import { documentById } from '../documents';
 import { openableCardProps } from '../attachmentCardA11y';
 import ActionButton from '../components/ActionButton';
 import PageTitle from '../components/PageTitle';
-// V7.68 (3 oct.) — journal de diagnostic temporaire (voir ../debugLog.js), le temps de trouver
-// la cause réelle du bug "la feuille se ferme au choix d'un fichier" sans accès à un ordinateur
-// pour brancher le téléphone. À retirer une fois le bug corrigé et confirmé.
-import DebugLogSheet from '../components/DebugLogSheet';
 
 const ICONS = { document: FileText, photo: Image, lien: Link2, info: Info };
 
@@ -52,7 +48,6 @@ export default function Partages({
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
   const [flashId, setFlashId] = useState(null);
-  const [showDebugLog, setShowDebugLog] = useState(false);
   const cardRefs = useRef({});
   const searchInputRef = useRef(null);
 
@@ -137,23 +132,6 @@ export default function Partages({
           <Plus size={16} /> Ajouter un partage
         </button>
       </div>
-
-      {/* V7.68 (3 oct.) — accès discret au journal de diagnostic temporaire, admin seulement
-          (même règle que le crayon d'édition du p'tit billet) : outil de dépannage, pas une
-          fonctionnalité destinée à tout le monde. À retirer une fois le bug "la feuille se
-          ferme au choix d'un fichier" corrigé et confirmé. */}
-      {isAdmin && (
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-          <button
-            onClick={() => setShowDebugLog(true)}
-            className="tap-surface"
-            style={{ background: 'none', border: 'none', color: MUTED, fontSize: 11.5, textDecoration: 'underline', padding: 4 }}
-          >
-            Journal de diagnostic
-          </button>
-        </div>
-      )}
-      {showDebugLog && <DebugLogSheet onClose={() => setShowDebugLog(false)} />}
 
       {/* Backlog point 4 : états dédiés Partages (mêmes principes que Messages.jsx) — une
           erreur réelle reste affichée telle quelle, jamais de repli silencieux vers une donnée
