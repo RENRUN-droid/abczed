@@ -186,13 +186,21 @@ export default function Messages({
   // instantané (pas `smooth`) : une ouverture de page atterrit directement à sa place, comme
   // n'importe quelle appli de messagerie — rien à animer, contrairement à un lien profond qui,
   // lui, doit visiblement "amener" l'œil vers sa cible.
+  //
+  // CORRECTIF (5 oct., même jour) : signalé par l'utilisateur — la première version
+  // (`el.scrollIntoView({ block: 'end' })` sur la ligne du dernier message) calait le bas DU
+  // MESSAGE sur le bas DE LA FENÊTRE, sans tenir compte du compositeur en `position: fixed`
+  // (plus bas, "V7.52") qui recouvre physiquement cette zone — le dernier message se retrouvait
+  // caché derrière, un seul message plus haut (l'avant-dernier) restant seul visible. Remplacé
+  // par `window.scrollTo` jusqu'au bas RÉEL de la page : le conteneur racine a déjà
+  // `paddingBottom: 140` (voir le `return` plus bas) prévu exactement pour laisser la place au
+  // compositeur fixe — aller jusqu'à ce bas réel, plutôt que caler un élément sur le bord de la
+  // fenêtre, replace donc correctement le dernier message juste au-dessus, jamais dessous.
   useEffect(() => {
     if (restoreState || highlightMessageId) return;
     if (visible.length === 0) return;
-    const lastId = visible[visible.length - 1].id;
     const cancel = afterPaint(() => {
-      const el = rowRefs.current[lastId];
-      if (el) el.scrollIntoView({ behavior: 'auto', block: 'end' });
+      window.scrollTo(0, document.documentElement.scrollHeight);
     });
     return cancel;
     // eslint-disable-next-line react-hooks/exhaustive-deps
