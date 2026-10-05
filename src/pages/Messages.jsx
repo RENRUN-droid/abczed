@@ -9,7 +9,7 @@ import { BLUE, RED, INK, MUTED, CARD_BORDER, SECTION_THEMES, FONT_DISPLAY } from
 import { TODAY_ISO } from '../data';
 import { computeVisibleMessages } from '../messageSearch';
 import { useScrollRestore } from '../useScrollRestore';
-import { prefersReducedMotion, supportsHoverPointer } from '../motionPrefs';
+import { prefersReducedMotion, supportsHoverPointer, afterPaint } from '../motionPrefs';
 import { useModalA11y } from '../useModalA11y';
 import { reactionSummary, REACTION_EMOJIS } from '../reactions';
 import { openableCardProps } from '../attachmentCardA11y';
@@ -169,6 +169,34 @@ export default function Messages({
   // une copie de la logique.
   const q = (searchQuery || '').trim();
   const visible = computeVisibleMessages(thread, linkedEvent, q, events, TODAY_ISO);
+
+  // V7.74 (5 oct.) — la page s'ouvrait toujours en haut de l'historique (le tout premier
+  // message), jamais sur les messages récents — signalé par l'utilisateur via capture d'écran :
+  // il fallait défiler manuellement pour atteindre les messages du jour. Comportement standard
+  // de toute appli de messagerie (WhatsApp, SMS...) : l'ORDRE des messages reste inchangé (du
+  // plus ancien en haut au plus récent en bas, cohérent avec "Répondre à" qui doit pouvoir
+  // remonter vers l'origine) — seule la position de défilement À L'OUVERTURE change, pour
+  // atterrir directement sur le dernier message. Ne s'applique QUE sur un montage "normal" :
+  // jamais si un retour de navigation a sa propre position à restaurer (`restoreState`,
+  // useScrollRestore ci-dessus) ni si un lien profond cible un message précis
+  // (`highlightMessageId`, effet plus bas) — ces deux cas gèrent déjà leur propre scroll, qu'un
+  // saut automatique vers le bas écraserait sinon. `afterPaint` (double rAF, même utilitaire que
+  // useScrollRestore) : attend un cycle de peinture complet avant de mesurer/scroller, pour les
+  // mêmes raisons que ce module (hauteur réelle du contenu pas encore stable sinon). Scroll
+  // instantané (pas `smooth`) : une ouverture de page atterrit directement à sa place, comme
+  // n'importe quelle appli de messagerie — rien à animer, contrairement à un lien profond qui,
+  // lui, doit visiblement "amener" l'œil vers sa cible.
+  useEffect(() => {
+    if (restoreState || highlightMessageId) return;
+    if (visible.length === 0) return;
+    const lastId = visible[visible.length - 1].id;
+    const cancel = afterPaint(() => {
+      const el = rowRefs.current[lastId];
+      if (el) el.scrollIntoView({ behavior: 'auto', block: 'end' });
+    });
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Brief §22 : séparateurs Aujourd'hui / Hier / date complète, sans répéter une date
   // complète sous chaque message — un séparateur chaque fois que le jour change.
