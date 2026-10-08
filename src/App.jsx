@@ -167,6 +167,11 @@ export default function App({ activeCommunity, memberships }) {
   // mais fil jamais ouvert). `null` = jamais ouvert le fil de cette communauté (voir
   // messagesApi.fetchLastReadAt), pas une date à traiter comme réelle.
   const [lastReadAt, setLastReadAt] = useState(null);
+  // V7.75 (8 oct.) — même mécanisme que lastReadAt/hasUnreadMessages ci-dessus, étendu aux
+  // partages (demande explicite de l'utilisateur après avoir constaté qu'un partage ajouté ne
+  // déclenchait rien). État séparé et indépendant : ouvrir Messages ne doit jamais éteindre le
+  // badge des partages non lus, et inversement.
+  const [sharesLastReadAt, setSharesLastReadAt] = useState(null);
   // V7.11 (P1) — un seul ordonnanceur partagé pour toute la session (App.jsx ne se démonte
   // jamais), par domaine ('messages' couvre messages+réactions, 'agenda' couvre
   // événements+RSVP/participants — voir src/reloadScheduler.js pour l'explication complète de
@@ -494,6 +499,48 @@ export default function App({ activeCommunity, memberships }) {
       return new Date(m.createdAtIso) > new Date(lastReadAt);
     });
   }, [thread, currentUserId, lastReadAt]);
+
+  // V7.75 (8 oct.) — même trio d'effets que lastReadAt/markMessagesRead/hasUnreadMessages
+  // ci-dessus (V7.45), appliqué aux partages plutôt qu'aux messages. Lecture initiale de
+  // `shares_last_read_at` : une seule fois par changement de communauté/utilisateur (le
+  // marquage-lu, juste après, met déjà `sharesLastReadAt` à jour localement sans repasser par ce
+  // chargement). Échec silencieux volontaire, même raisonnement que lastReadAt : au pire le
+  // badge se comporte comme "jamais lu" jusqu'au prochain chargement.
+  useEffect(() => {
+    if (!SHARES_FROM_SUPABASE || !communityId || !currentUserId) {
+      setSharesLastReadAt(null);
+      return;
+    }
+    sharesApi
+      .fetchSharesLastReadAt(communityId, currentUserId)
+      .then(setSharesLastReadAt)
+      .catch(() => setSharesLastReadAt(null));
+  }, [communityId, currentUserId]);
+
+  // Marque Partages comme lu dès que la personne arrive sur cette vue — écrit en base (pour que
+  // le badge reste éteint à la prochaine connexion) ET localement (pour que le badge s'éteigne
+  // immédiatement à l'écran, sans attendre un aller-retour réseau).
+  useEffect(() => {
+    if (!SHARES_FROM_SUPABASE || !communityId || !currentUserId) return;
+    if (view !== 'partages') return;
+    const readAt = new Date().toISOString();
+    sharesApi
+      .markSharesRead(communityId, currentUserId)
+      .then(() => setSharesLastReadAt(readAt))
+      .catch(() => {});
+  }, [view, communityId, currentUserId]);
+
+  // Dérivé de `shares` + `sharesLastReadAt` : vrai s'il existe au moins un partage ajouté par un
+  // AUTRE membre (jamais compté pour ses propres partages, même raisonnement que
+  // hasUnreadMessages) dont `createdAtIso` est postérieur à `sharesLastReadAt`.
+  // `sharesLastReadAt === null` (jamais ouvert Partages) : tout partage d'autrui compte non lu.
+  const hasUnreadShares = useMemo(() => {
+    return shares.some((s) => {
+      if (s.authorId === currentUserId) return false;
+      if (!sharesLastReadAt) return true;
+      return new Date(s.createdAtIso) > new Date(sharesLastReadAt);
+    });
+  }, [shares, currentUserId, sharesLastReadAt]);
 
   // ---------------------------------------------------------------------------------------
   // V7.7 — Messages (P1/P2/P6). Même méthode défensive que loadMemberships (AuthProvider.jsx) :
@@ -1670,7 +1717,11 @@ export default function App({ activeCommunity, memberships }) {
                   activées ou non". Ce point signale "il y a des messages reçus depuis la
                   dernière ouverture du fil" (voir hasUnreadMessages), que la cloche soit bleue
                   ou grise. `position: relative` sur le bouton uniquement pour ce point — aucun
-                  changement du bouton lui-même (taille, cible tactile, comportement au clic). */}
+                  changement du bouton lui-même (taille, cible tactile, comportement au clic).
+                  V7.75 (8 oct.) : étendu aux partages non lus (hasUnreadShares) — un seul et
+                  même point rouge pour "il y a quelque chose de nouveau à voir" (message OU
+                  partage), plutôt qu'un second indicateur distinct qui aurait demandé à la
+                  personne de deviner lequel des deux a changé. */}
               {pushApi.isPushSupported() && (
                 <button
                   type="button"
@@ -1687,7 +1738,7 @@ export default function App({ activeCommunity, memberships }) {
                   }}
                 >
                   {pushSubscribed ? <Bell size={20} color={BLUE} /> : <BellOff size={20} color={MUTED} />}
-                  {hasUnreadMessages && (
+                  {(hasUnreadMessages || hasUnreadShares) && (
                     <span
                       aria-hidden="true"
                       style={{
