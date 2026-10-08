@@ -134,6 +134,13 @@ export async function fetchShares(communityId) {
       linkUrl: r.link_url,
       domain: r.domain,
       linkedEventId: r.linked_event_id,
+      // V7.75 (8 oct.) — ajouté pour le badge rouge (partages non lus, voir
+      // fetchSharesLastReadAt/markSharesRead plus bas) : `created_at` était déjà sélectionné par
+      // la requête ci-dessus mais jamais exposé dans l'objet mappé jusqu'ici (rien n'en avait
+      // besoin avant). Même nom que messagesApi.js (`createdAtIso`) pour cohérence — un vrai
+      // timestamptz, jamais `date` (colonne `date` sans heure, déjà utilisée pour l'affichage,
+      // impropre à une comparaison "avant/après la dernière lecture").
+      createdAtIso: r.created_at,
     };
   });
 }
@@ -251,4 +258,39 @@ export function subscribeToShares(communityId, onChange) {
     )
     .subscribe();
   return () => supabase.removeChannel(channel);
+}
+
+// ---------------------------------------------------------------------------
+// V7.75 (8 oct.) — Badge rouge sur la cloche, étendu aux partages (même demande/mécanisme que
+// messagesApi.js V7.45 pour les messages — voir sql/21_shares_last_read.sql pour le détail des
+// droits, déjà couverts, aucun grant/policy nouveau). Deux fonctions dédiées, même séparation de
+// responsabilités que messagesApi.js vis-à-vis de membersApi.js : cette donnée (quand MOI j'ai
+// ouvert Partages) n'a rien à voir avec l'annuaire La Bande.
+// ---------------------------------------------------------------------------
+
+// Lue une seule fois par changement de communauté/utilisateur (App.jsx) — `null` si la personne
+// n'a jamais ouvert Partages de cette communauté (colonne par défaut `null`, voir
+// sql/21_shares_last_read.sql), jamais une date arbitraire substituée ici.
+export async function fetchSharesLastReadAt(communityId, userId) {
+  const { data, error } = await supabase
+    .from('members')
+    .select('shares_last_read_at')
+    .eq('community_id', communityId)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (error) throw error;
+  return data?.shares_last_read_at || null;
+}
+
+// Appelée par App.jsx à chaque fois que la vue Partages devient active. Filtre sur
+// `user_id = userId` (jamais sur l'id de ligne members) — même policy "update_own_display_
+// fields_or_admin" déjà en place que messagesApi.markMessagesRead.
+export async function markSharesRead(communityId, userId) {
+  const { error } = await supabase
+    .from('members')
+    .update({ shares_last_read_at: new Date().toISOString() })
+    .eq('community_id', communityId)
+    .eq('user_id', userId);
+  if (error) throw error;
 }
