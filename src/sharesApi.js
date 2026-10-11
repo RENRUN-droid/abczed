@@ -22,6 +22,13 @@ import { supabase } from './supabaseClient';
 // Supabase pour l'instant — celle-ci est uniquement applicative, documentée ici).
 export const MAX_SHARE_FILE_BYTES = 10_000_000; // ~10 Mo
 
+// V7.76 (11 oct.) — plafond CLIENT, uniquement pour afficher une erreur inline immédiate dans
+// AddShareSheet.jsx sans attendre un aller-retour serveur ; la vraie limite qui compte est
+// appliquée côté serveur par le trigger `app_private.check_share_files_limit()` (voir
+// sql/22_share_files.sql) — cette constante doit juste rester EGALE à la valeur codée dans ce
+// trigger, jamais une source de vérité à elle seule.
+export const MAX_SHARE_FILES_COUNT = 10;
+
 // Une URL signée expire — voir SIGNED_URL_TTL_SECONDS ci-dessous. Limite connue et assumée
 // (documentée dans MATRICE_LIVRAISON.md) : un onglet Partages resté ouvert plus d'une heure
 // sans aucun rechargement peut présenter un lien "Ouvrir"/"Télécharger" expiré tant que la
@@ -49,9 +56,14 @@ function safeStorageName(fileName) {
     .replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
-function storagePathFor(communityId, userId, shareId, fileName) {
+// V7.76 (11 oct.) — `fileId` ajouté à la convention de chemin pour permettre PLUSIEURS fichiers
+// sous le même `shareId` sans collision (un seul fichier par partage jusqu'ici, un chemin par
+// `shareId` suffisait). Reste À L'INTÉRIEUR du 3e segment du chemin (community_id/user_id/CECI) —
+// voir le commentaire en tête de sql/22_share_files.sql : les policies Storage existantes
+// (sql/03_storage.sql) ne lisent que les segments [1]/[2], jamais celui-ci, donc rien à y changer.
+function storagePathFor(communityId, userId, shareId, fileId, fileName) {
   const safeName = safeStorageName(fileName);
-  return `${communityId}/${userId}/${shareId}-${safeName}`;
+  return `${communityId}/${userId}/${shareId}-${fileId}-${safeName}`;
 }
 
 function formatBytes(n) {
@@ -98,7 +110,33 @@ export async function fetchShares(communityId) {
     return namesByUserId[userId] || 'Membre';
   }
 
-  const pathsNeeded = rows.filter((r) => r.file_path).map((r) => r.file_path);
+  // V7.76 (11 oct.) — table `share_files` (voir sql/22_share_files.sql) : un partage peut
+  // désormais avoir PLUSIEURS fichiers. Un seul aller-retour pour TOUS les partages de la page
+  // (jamais un par partage) — même principe que la résolution des auteurs ci-dessus.
+  const shareIds = rows.map((r) => r.id);
+  let fileRowsByShareId = {};
+  if (shareIds.length > 0) {
+    const { data: fileRows, error: filesErr } = await supabase
+      .from('share_files')
+      .select('id, share_id, file_path, file_name, file_size, created_at')
+      .in('share_id', shareIds)
+      .order('created_at', { ascending: true });
+    if (filesErr) throw filesErr;
+    fileRowsByShareId = (fileRows || []).reduce((acc, f) => {
+      (acc[f.share_id] = acc[f.share_id] || []).push(f);
+      return acc;
+    }, {});
+  }
+
+  // URLs signées en lot pour TOUS les chemins impliqués — les nouveaux (`share_files`) ET les
+  // anciens (colonne `shares.file_path`, encore utilisée en repli pour un partage créé AVANT
+  // cette migration, quand `share_files` est vide pour ce partage précis — voir le commentaire
+  // en tête de sql/22_share_files.sql).
+  const newPaths = Object.values(fileRowsByShareId).flat().map((f) => f.file_path);
+  const legacyPaths = rows
+    .filter((r) => r.file_path && !(fileRowsByShareId[r.id]?.length > 0))
+    .map((r) => r.file_path);
+  const pathsNeeded = [...new Set([...newPaths, ...legacyPaths])];
   let signedUrlByPath = {};
   if (pathsNeeded.length > 0) {
     const { data: signed, error: signErr } = await supabase.storage
@@ -106,15 +144,38 @@ export async function fetchShares(communityId) {
       .createSignedUrls(pathsNeeded, SIGNED_URL_TTL_SECONDS);
     if (signErr) throw signErr;
     // Un chemin individuellement en échec (fichier supprimé du bucket hors synchronisation
-    // avec la ligne `shares`, cas limite) ne doit jamais faire échouer TOUTE la liste — url à
-    // null pour CE partage seulement, jamais une exception qui viderait tout l'écran.
+    // avec la ligne `shares`/`share_files`, cas limite) ne doit jamais faire échouer TOUTE la
+    // liste — url à null pour CE fichier seulement, jamais une exception qui viderait tout
+    // l'écran.
     signedUrlByPath = Object.fromEntries(
       (signed || []).map((s) => [s.path, s.error ? null : s.signedUrl]),
     );
   }
 
   return rows.map((r) => {
-    const fileUrl = r.file_path ? (signedUrlByPath[r.file_path] ?? null) : null;
+    const fileRows = fileRowsByShareId[r.id] || [];
+    // Repli historique : partage créé AVANT cette migration (aucune ligne `share_files`), son
+    // unique fichier vit encore dans les colonnes `shares.file_path`/`file_name`/`file_size` —
+    // `id: null` le distingue d'un vrai fichier `share_files` (utile à AddShareSheet.jsx pour
+    // savoir qu'il n'y a pas de ligne `share_files` à supprimer si celui-ci est retiré).
+    const files = fileRows.length > 0
+      ? fileRows.map((f) => ({
+          id: f.id,
+          name: f.file_name,
+          size: f.file_size,
+          path: f.file_path,
+          url: signedUrlByPath[f.file_path] ?? null,
+        }))
+      : (r.file_path
+          ? [{
+              id: null,
+              name: r.file_name,
+              size: r.file_size,
+              path: r.file_path,
+              url: signedUrlByPath[r.file_path] ?? null,
+            }]
+          : []);
+
     return {
       id: r.id,
       type: r.type,
@@ -125,12 +186,19 @@ export async function fetchShares(communityId) {
       // `date` est une colonne `date` (pas timestamptz) — déjà au format ISO jour (YYYY-MM-DD)
       // attendu tel quel par fmtDate (Partages.jsx), aucune conversion de fuseau nécessaire.
       date: r.date,
-      fileName: r.file_name,
-      fileSize: r.file_size,
-      filePath: r.file_path,
-      fileDataUrl: r.type === 'document' ? fileUrl : undefined,
-      photoDataUrl: r.type === 'photo' ? fileUrl : undefined,
-      photoCount: r.photo_count,
+      // V7.76 — nouvelle source de vérité pour l'affichage (Partages.jsx) et l'édition
+      // (AddShareSheet.jsx) : un tableau, jamais un fichier unique, même pour un partage qui n'en
+      // a qu'un seul.
+      files,
+      // Champs conservés pour compatibilité (toujours dérivés de `files`, jamais relus
+      // directement sur `r` — un partage multi-fichiers n'a plus de sens avec un seul "le"
+      // fichier, mais rien ici ne doit planter pour un code pas encore adapté).
+      fileName: files[0]?.name,
+      fileSize: files[0]?.size,
+      filePath: files[0]?.path,
+      fileDataUrl: r.type === 'document' ? files[0]?.url : undefined,
+      photoDataUrl: r.type === 'photo' ? files[0]?.url : undefined,
+      photoCount: r.type === 'photo' ? files.length : null,
       linkUrl: r.link_url,
       domain: r.domain,
       linkedEventId: r.linked_event_id,
@@ -149,22 +217,35 @@ export async function fetchShares(communityId) {
 // `shares` — `shareId` est généré côté client (crypto.randomUUID()) précisément pour pouvoir
 // construire le chemin final avant l'insertion, plutôt que de dépendre d'un id renvoyé après
 // coup par la base.
-async function uploadShareFile(communityId, userId, shareId, file) {
-  const path = storagePathFor(communityId, userId, shareId, file.name);
+async function uploadShareFile(communityId, userId, shareId, fileId, file) {
+  const path = storagePathFor(communityId, userId, shareId, fileId, file.name);
   const { error } = await supabase.storage.from('community-files').upload(path, file, { upsert: false });
   if (error) throw error;
   return path;
 }
 
 // ---------------------------------------------------------------------------
-// Création. `file` = objet File réel (input type=file, AddShareSheet.jsx) ou `null`/`undefined`
-// pour un partage 'lien'/'info', qui n'en a jamais. `authorId` vient TOUJOURS de l'appelant
-// (App.jsx, `currentUserId` = session.user.id réelle) — jamais saisi côté interface ; la policy
+// Création. V7.76 (11 oct.) — `files` = tableau d'objets File réels (0 à MAX_SHARE_FILES_COUNT,
+// AddShareSheet.jsx), `[]`/`undefined` pour un partage 'lien'/'info' (qui n'en a jamais) ou un
+// partage 'document'/'photo' sans aucun fichier choisi (cas déjà empêché par la validation
+// d'AddShareSheet.jsx, mais pas supposé ici). `authorId` vient TOUJOURS de l'appelant (App.jsx,
+// `currentUserId` = session.user.id réelle) — jamais saisi côté interface ; la policy
 // `insert_own_share` (sql/02_rls.sql) l'exigerait de toute façon.
 // ---------------------------------------------------------------------------
-export async function createShare(communityId, authorId, payload, file) {
+export async function createShare(communityId, authorId, payload, files) {
   const id = crypto.randomUUID();
-  const filePath = file ? await uploadShareFile(communityId, authorId, id, file) : null;
+  const fileList = files || [];
+
+  // Chaque fichier est déposé dans le bucket AVANT l'insertion de la ligne `shares` — même
+  // ordre de prudence que l'ancien code à un seul fichier : jamais une ligne qui pointerait
+  // vers un fichier pas encore réellement présent dans le bucket.
+  const uploaded = [];
+  for (const file of fileList) {
+    const fileId = crypto.randomUUID();
+    const path = await uploadShareFile(communityId, authorId, id, fileId, file);
+    uploaded.push({ fileId, path, name: file.name, size: formatBytes(file.size) });
+  }
+
   const row = {
     id,
     community_id: communityId,
@@ -172,28 +253,61 @@ export async function createShare(communityId, authorId, payload, file) {
     title: payload.title,
     description: payload.description || '',
     author_id: authorId,
-    file_name: file ? file.name : null,
-    file_size: file ? formatBytes(file.size) : null,
-    file_path: filePath,
-    photo_count: payload.type === 'photo' ? 1 : null,
+    // Colonnes historiques laissées à `null` pour tout NOUVEAU partage — `share_files`
+    // ci-dessous est désormais l'unique source pour les fichiers, même quand il n'y en a qu'un
+    // seul (voir le commentaire en tête de sql/22_share_files.sql).
+    file_name: null,
+    file_size: null,
+    file_path: null,
+    photo_count: payload.type === 'photo' ? uploaded.length : null,
     link_url: payload.type === 'lien' ? payload.linkUrl : null,
     domain: payload.type === 'lien' ? payload.domain : null,
     linked_event_id: payload.linkedEventId || null,
   };
   const { error } = await supabase.from('shares').insert([row]);
   if (error) throw error;
+
+  if (uploaded.length > 0) {
+    const fileRows = uploaded.map((u) => ({
+      id: u.fileId,
+      share_id: id,
+      community_id: communityId,
+      author_id: authorId,
+      file_path: u.path,
+      file_name: u.name,
+      file_size: u.size,
+    }));
+    const { error: filesErr } = await supabase.from('share_files').insert(fileRows);
+    if (filesErr) {
+      // Best effort : la ligne `shares` déjà créée est retirée pour ne jamais laisser un
+      // partage "vide" visible sans aucun des fichiers que l'utilisateur avait pourtant choisis
+      // — jamais l'inverse (des fichiers orphelins dans le bucket, défaut mineur déjà accepté
+      // ailleurs dans ce fichier, plutôt qu'une ligne trompeuse).
+      await supabase.from('shares').delete().eq('id', id).catch(() => {});
+      throw filesErr;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Modification. Les policies RLS existantes restent la source d'autorité (auteur ou admin de
-// la communauté seulement — `update_own_share_or_admin`). `file` non nul = remplacement réel :
-// le nouveau fichier est déposé sous un chemin distinct AVANT l'update de la ligne, et l'ANCIEN
-// fichier n'est supprimé du bucket qu'APRÈS le succès de cet update — jamais l'inverse, pour ne
-// jamais perdre le fichier existant si l'update échoue en cours de route (ex. RLS refuse).
-// `previousFilePath` est transmis explicitement par l'appelant (App.jsx, depuis l'état `shares`
-// déjà chargé) plutôt que relu ici, pour ne pas ajouter un aller-retour réseau supplémentaire.
+// la communauté seulement — `update_own_share_or_admin` pour la ligne `shares`,
+// `delete_own_share_file_or_admin`/`insert_share_file_own_share_or_admin` pour `share_files`).
+//
+// `newFiles` = tableau d'objets File réels à AJOUTER. `removedFiles` = tableau d'éléments
+// `{ id, path }` (tels que renvoyés par `files` dans fetchShares) à RETIRER — `id` vaut `null`
+// pour un fichier encore porté par les colonnes historiques (repli pré-migration, voir
+// fetchShares), auquel cas ces colonnes sont vidées sur la ligne `shares` elle-même plutôt que
+// de chercher une ligne `share_files` inexistante.
+//
+// Ordre volontaire, même prudence que l'ancien code à un seul fichier : 1) l'update de la ligne
+// `shares` (et le vidage des colonnes historiques si besoin) d'abord — seule source d'autorité
+// RLS ; 2) suppression des lignes `share_files` retirées, SEULEMENT après ce succès ; 3) nettoyage
+// best-effort du bucket pour tous les fichiers retirés ; 4) upload + insertion des nouveaux
+// fichiers. Jamais de suppression de fichier AVANT la confirmation que la modification
+// "principale" a bien été appliquée.
 // ---------------------------------------------------------------------------
-export async function updateShare(shareId, communityId, authorId, payload, file, previousFilePath) {
+export async function updateShare(shareId, communityId, authorId, payload, newFiles, removedFiles) {
   const patch = {
     title: payload.title,
     description: payload.description || '',
@@ -203,11 +317,16 @@ export async function updateShare(shareId, communityId, authorId, payload, file,
     patch.link_url = payload.linkUrl;
     patch.domain = payload.domain;
   }
-  if (file) {
-    patch.file_path = await uploadShareFile(communityId, authorId, shareId, file);
-    patch.file_name = file.name;
-    patch.file_size = formatBytes(file.size);
+
+  const removedList = removedFiles || [];
+  const removedLegacy = removedList.filter((f) => f.id == null);
+  const removedNew = removedList.filter((f) => f.id != null);
+  if (removedLegacy.length > 0) {
+    patch.file_path = null;
+    patch.file_name = null;
+    patch.file_size = null;
   }
+
   const { data, error } = await supabase.from('shares').update(patch).eq('id', shareId).select('id');
   if (error) throw error;
   if (!data || data.length === 0) {
@@ -215,19 +334,46 @@ export async function updateShare(shareId, communityId, authorId, payload, file,
     err.code = 'UPDATE_NOT_APPLIED';
     throw err;
   }
-  if (file && previousFilePath) {
-    // Best effort délibéré — un échec de nettoyage ne fait jamais échouer une modification déjà
-    // appliquée avec succès (ligne déjà à jour) ; un fichier orphelin dans le bucket reste un
-    // défaut mineur de nettoyage, jamais une perte de donnée pour l'utilisateur.
-    await supabase.storage.from('community-files').remove([previousFilePath]).catch(() => {});
+
+  if (removedNew.length > 0) {
+    await supabase.from('share_files').delete().in('id', removedNew.map((f) => f.id)).catch(() => {});
+  }
+  // Nettoyage best-effort du bucket pour TOUS les fichiers retirés (legacy et nouveaux) — même
+  // raisonnement "best effort" que partout ailleurs dans ce fichier : un fichier orphelin dans
+  // le bucket est un défaut mineur de nettoyage, jamais une perte de donnée pour l'utilisateur.
+  const removedPaths = removedList.map((f) => f.path).filter(Boolean);
+  if (removedPaths.length > 0) {
+    await supabase.storage.from('community-files').remove(removedPaths).catch(() => {});
+  }
+
+  const fileList = newFiles || [];
+  if (fileList.length > 0) {
+    const fileRows = [];
+    for (const file of fileList) {
+      const fileId = crypto.randomUUID();
+      const path = await uploadShareFile(communityId, authorId, shareId, fileId, file);
+      fileRows.push({
+        id: fileId,
+        share_id: shareId,
+        community_id: communityId,
+        author_id: authorId,
+        file_path: path,
+        file_name: file.name,
+        file_size: formatBytes(file.size),
+      });
+    }
+    const { error: filesErr } = await supabase.from('share_files').insert(fileRows);
+    if (filesErr) throw filesErr;
   }
 }
 
 // Suppression. Même raisonnement que la modification : la ligne `shares` est supprimée
-// d'abord (RLS = source d'autorité), le fichier associé n'est retiré du bucket qu'ensuite, en
-// best effort — jamais l'inverse (un fichier supprimé puis un refus RLS sur la ligne laisserait
-// une ligne orpheline pointant vers rien).
-export async function deleteShare(shareId, filePath) {
+// d'abord (RLS = source d'autorité) — les lignes `share_files` disparaissent automatiquement
+// (ON DELETE CASCADE, voir sql/22_share_files.sql) — puis TOUS les fichiers associés sont
+// retirés du bucket, en best effort, jamais l'inverse (un fichier supprimé puis un refus RLS
+// sur la ligne laisserait une ligne orpheline pointant vers rien). `filePaths` = tableau de
+// chemins (tous les `files[].path` du partage côté appelant, App.jsx).
+export async function deleteShare(shareId, filePaths) {
   const { data, error } = await supabase.from('shares').delete().eq('id', shareId).select('id');
   if (error) throw error;
   if (!data || data.length === 0) {
@@ -235,8 +381,9 @@ export async function deleteShare(shareId, filePath) {
     err.code = 'DELETE_NOT_APPLIED';
     throw err;
   }
-  if (filePath) {
-    await supabase.storage.from('community-files').remove([filePath]).catch(() => {});
+  const paths = (filePaths || []).filter(Boolean);
+  if (paths.length > 0) {
+    await supabase.storage.from('community-files').remove(paths).catch(() => {});
   }
 }
 
