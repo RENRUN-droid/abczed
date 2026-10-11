@@ -3,7 +3,7 @@ import { X, FileText, Image, Link2, Info, Paperclip } from 'lucide-react';
 import { RED, MUTED, CARD_BORDER, SHARE_TYPE_THEMES, SECTION_THEMES, FONT_DISPLAY } from '../theme';
 import { useModalA11y } from '../useModalA11y';
 import { isValidAbsoluteUrl } from '../urlValidation';
-import { MAX_SHARE_FILE_BYTES } from '../sharesApi';
+import { MAX_SHARE_FILE_BYTES, MAX_SHARE_FILES_COUNT } from '../sharesApi';
 
 const TYPES = [
   { key: 'document', label: 'Fichier', icon: FileText },
@@ -63,17 +63,21 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   const [description, setDescription] = useState(editingShare?.description || '');
   const [linkUrl, setLinkUrl] = useState(editingShare?.linkUrl || '');
   const [linkedEventId, setLinkedEventId] = useState(editingShare?.linkedEventId || '');
-  // Backlog point 4 (23 sept.) : un vrai fichier choisi via <input type="file">, transmis TEL
-  // QUEL (objet File) à onCreate — src/sharesApi.js l'envoie directement à Supabase Storage.
-  // Plus de lecture FileReader/`data:` URL ici : celle-ci n'existait que pour la démonstration
-  // locale d'avant ce lot (localStorage, quota ~5 Mo/origine — voir sql/08_shares_storage.sql,
-  // qui documentait déjà ce schéma cible). `null` tant qu'aucun NOUVEAU fichier n'a été choisi —
-  // en modification, le fichier déjà enregistré (editingShare.fileName/photoDataUrl, résolu en
-  // URL signée par sharesApi.fetchShares) reste utilisé si non remplacé (voir submit()).
-  const [documentFile, setDocumentFile] = useState(null);
-  const [photoFile, setPhotoFile] = useState(null);
-  // Aperçu local avant envoi (URL objet, jamais transmise à onCreate — seul `photoFile` l'est).
-  const [photoPreviewUrl, setPhotoPreviewUrl] = useState(null);
+  // V7.76 (11 oct.) — plusieurs fichiers par partage (Documents ET Photos, jusqu'à
+  // MAX_SHARE_FILES_COUNT), demande explicite de l'utilisatrice : le formulaire ne permettait
+  // jusqu'ici de choisir qu'UN SEUL fichier, sans pouvoir en ajouter d'autres ensuite. Remplace
+  // les anciens `documentFile`/`photoFile` (un seul File, ou `null`) par deux tableaux — un par
+  // type, car un partage n'a qu'un seul `type` à la fois (document OU photo, jamais les deux) et
+  // changer de tuile ne doit pas faire disparaître ce qui a déjà été choisi dans l'autre tuile.
+  // Chaque entrée : `{ localId, file, previewUrl }` — `localId` (clé React stable + ciblage pour
+  // le retrait), `previewUrl` (URL objet, UNIQUEMENT pour les photos, `null` pour un document).
+  const [newDocFiles, setNewDocFiles] = useState([]);
+  const [newPhotoFiles, setNewPhotoFiles] = useState([]);
+  // En modification : fichiers DÉJÀ enregistrés (editingShare.files, résolus en URL signée par
+  // sharesApi.fetchShares) que l'utilisatrice a marqués à retirer — un Set de `path` (plutôt que
+  // `id`, qui peut valoir `null` pour un fichier encore porté par les colonnes historiques, voir
+  // le commentaire de fetchShares dans sharesApi.js — `path`, lui, est toujours unique et présent).
+  const [removedExistingFilePaths, setRemovedExistingFilePaths] = useState(() => new Set());
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -167,31 +171,84 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
     onClose();
   }
 
-  // Révoquée à chaque remplacement de photo et au démontage — jamais de fuite mémoire sur une
-  // longue session (plusieurs photos essayées avant validation).
+  // V7.76 — toutes les URLs objet (aperçus photo) encore vivantes sont révoquées au démontage,
+  // jamais de fuite mémoire sur une longue session (plusieurs photos essayées avant validation).
+  // Un `ref` tenu à jour à chaque rendu (plutôt qu'une dépendance `[newPhotoFiles]` sur l'effet
+  // lui-même) est nécessaire ici : avec une dépendance directe, la fonction de nettoyage
+  // s'exécuterait à CHAQUE changement du tableau (à chaque photo ajoutée/retirée), révoquant
+  // alors des aperçus encore affichés à l'écran — seul le tout dernier tableau, au démontage
+  // réel de la feuille, doit être révoqué.
+  const newPhotoFilesRef = useRef(newPhotoFiles);
+  newPhotoFilesRef.current = newPhotoFiles;
   useEffect(() => {
-    return () => { if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl); };
-  }, [photoPreviewUrl]);
+    return () => { newPhotoFilesRef.current.forEach((f) => { if (f.previewUrl) URL.revokeObjectURL(f.previewUrl); }); };
+  }, []);
 
   // P4 (même règle que LinkEventPicker, src/pages/Messages.jsx) : événements RÉELS de la
   // communauté (prop reçue de App.jsx, agenda Supabase) — plus jamais MOCK_EVENTS/data.js.
   // Rappels d'anniversaire explicitement exclus, même exclusion que partout ailleurs.
   const linkable = (events || []).filter((e) => e.category !== 'anniversaire');
 
-  function pickFile(fileList, kind) {
-    const file = fileList?.[0];
-    if (!file) return;
-    if (file.size > MAX_SHARE_FILE_BYTES) {
-      setErrors((prev) => ({ ...prev, [kind]: `Fichier trop volumineux (maximum ${formatBytes(MAX_SHARE_FILE_BYTES)}).` }));
+  // V7.76 — fichiers DÉJÀ enregistrés (en modification) pour le TYPE actuellement affiché
+  // seulement : si l'utilisatrice bascule la tuile vers un autre type pendant une modification
+  // (ex. un partage 'document' basculé vers 'photo'), les fichiers déjà enregistrés sous
+  // l'ancien type ne s'appliquent plus à l'affichage de ce nouveau type — même comportement
+  // implicite que l'ancien code (`editingShare?.fileName`/`editingShare?.photoDataUrl` n'étaient
+  // de toute façon jamais renseignés pour le type "opposé").
+  const existingFilesForType = (editingShare && editingShare.type === type) ? (editingShare.files || []) : [];
+  const existingVisible = existingFilesForType.filter((f) => !removedExistingFilePaths.has(f.path));
+  const newFilesForType = type === 'document' ? newDocFiles : type === 'photo' ? newPhotoFiles : [];
+  const remainingCount = existingVisible.length + newFilesForType.length;
+
+  // Choisit un ou plusieurs fichiers à la fois (`<input multiple>`) — `kind` = 'file' (Fichier)
+  // ou 'photo' (Photo), même clé que les erreurs de champ. Respecte le plafond
+  // MAX_SHARE_FILES_COUNT (fichiers déjà présents + nouveaux déjà choisis + ceux-ci) : les
+  // fichiers en trop ne sont simplement pas ajoutés, avec une erreur inline qui l'explique —
+  // jamais un plafond uniquement illustré côté serveur sans explication côté interface. Chaque
+  // fichier trop volumineux (MAX_SHARE_FILE_BYTES) est lui aussi ignoré individuellement, sans
+  // bloquer les autres fichiers valides du même lot.
+  function pickFiles(fileList, kind) {
+    const incoming = Array.from(fileList || []);
+    if (incoming.length === 0) return;
+    const setFiles = kind === 'file' ? setNewDocFiles : setNewPhotoFiles;
+    const currentCount = existingVisible.length + (kind === 'file' ? newDocFiles.length : newPhotoFiles.length);
+    const room = MAX_SHARE_FILES_COUNT - currentCount;
+    if (room <= 0) {
+      setErrors((prev) => ({ ...prev, [kind]: `Maximum ${MAX_SHARE_FILES_COUNT} fichiers par partage.` }));
       return;
     }
-    setErrors((prev) => { const next = { ...prev }; delete next[kind]; return next; });
-    if (kind === 'file') {
-      setDocumentFile(file);
-    } else {
-      setPhotoFile(file);
-      setPhotoPreviewUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(file); });
+    const accepted = [];
+    const tooLarge = [];
+    for (const file of incoming) {
+      if (accepted.length >= room) break;
+      if (file.size > MAX_SHARE_FILE_BYTES) { tooLarge.push(file.name); continue; }
+      accepted.push({
+        localId: crypto.randomUUID(),
+        file,
+        previewUrl: kind === 'photo' ? URL.createObjectURL(file) : null,
+      });
     }
+    if (accepted.length > 0) {
+      setErrors((prev) => { const next = { ...prev }; delete next[kind]; return next; });
+      setFiles((prev) => [...prev, ...accepted]);
+    }
+    if (tooLarge.length > 0) {
+      setErrors((prev) => ({ ...prev, [kind]: `Fichier(s) trop volumineux (maximum ${formatBytes(MAX_SHARE_FILE_BYTES)}) : ${tooLarge.join(', ')}` }));
+    } else if (incoming.length > accepted.length) {
+      setErrors((prev) => ({ ...prev, [kind]: `Maximum ${MAX_SHARE_FILES_COUNT} fichiers par partage — certains fichiers n'ont pas été ajoutés.` }));
+    }
+  }
+
+  // Retire un fichier NOUVELLEMENT choisi (pas encore envoyé) — révoque son aperçu immédiatement
+  // (contrairement au nettoyage au démontage ci-dessus, qui ne couvre que les fichiers encore
+  // présents à la fermeture de la feuille).
+  function removeNewFile(kind, localId) {
+    const setFiles = kind === 'file' ? setNewDocFiles : setNewPhotoFiles;
+    setFiles((prev) => {
+      const found = prev.find((f) => f.localId === localId);
+      if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
+      return prev.filter((f) => f.localId !== localId);
+    });
   }
 
   // Item 13 (même patron que CreateEventSheet.jsx) : validation réelle à la soumission, jamais
@@ -200,14 +257,8 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
   function validate() {
     const errs = {};
     if (!title.trim()) errs.title = 'Indique un titre.';
-    if (type === 'document') {
-      const hasFile = documentFile || editingShare?.fileName;
-      if (!hasFile) errs.file = 'Choisis un fichier.';
-    }
-    if (type === 'photo') {
-      const hasPhoto = photoFile || editingShare?.photoDataUrl;
-      if (!hasPhoto) errs.photo = 'Choisis une photo.';
-    }
+    if (type === 'document' && remainingCount === 0) errs.file = 'Choisis au moins un fichier.';
+    if (type === 'photo' && remainingCount === 0) errs.photo = 'Choisis au moins une photo.';
     if (type === 'lien') {
       if (!linkUrl.trim()) errs.linkUrl = 'Indique un lien.';
       else if (!isValidAbsoluteUrl(linkUrl)) errs.linkUrl = 'Adresse invalide — utilise une adresse complète, ex. https://exemple.fr.';
@@ -244,15 +295,23 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
       payload.linkUrl = trimmed;
       payload.domain = trimmed.replace(/^https?:\/\//, '').split('/')[0];
     }
-    // Backlog point 4 : le fichier réel (objet File, `undefined` si aucun nouveau fichier
-    // choisi) part directement vers App.jsx/sharesApi.js — plus aucune donnée de fichier
-    // construite ici (nom/taille/URL sont désormais dérivés côté sharesApi.js, à partir du
-    // File lui-même et de l'upload Storage réel).
-    const file = type === 'document' ? documentFile : type === 'photo' ? photoFile : null;
+    // V7.76 — les fichiers réels (objets File) et les fichiers existants retirés partent
+    // directement vers App.jsx/sharesApi.js — plus aucune donnée de fichier construite ici
+    // (nom/taille/URL sont désormais dérivés côté sharesApi.js, à partir du File lui-même et de
+    // l'upload Storage réel). `removedFiles` = `{ id, path }` de chaque fichier déjà enregistré
+    // que l'utilisatrice a marqué à retirer (`id` à `null` pour un repli pré-migration, voir
+    // fetchShares dans sharesApi.js — sharesApi.updateShare sait l'interpréter).
+    const removedFiles = existingFilesForType
+      .filter((f) => removedExistingFilePaths.has(f.path))
+      .map((f) => ({ id: f.id, path: f.path }));
+    const filesChange = {
+      newFiles: newFilesForType.map((f) => f.file),
+      removedFiles,
+    };
     // App.jsx renvoie { ok, error? } — un échec (réseau, RLS, upload Storage) garde le
     // formulaire ouvert avec toutes les valeurs déjà saisies intactes, erreur affichée inline,
     // jamais une fermeture silencieuse qui ferait croire le partage enregistré.
-    const result = await onCreate(payload, file);
+    const result = await onCreate(payload, filesChange);
     setSaving(false);
     if (result && result.ok === false) {
       setSubmitError(result.error || "Une erreur est survenue — réessaie.");
@@ -317,11 +376,14 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
           <AnimatedTypeFields>
           {type === 'document' && (
             <div>
-              <label htmlFor="ass-file" style={labelStyle}>Fichier</label>
+              <label htmlFor="ass-file" style={labelStyle}>Fichier(s)</label>
               <input
                 id="ass-file"
                 ref={fileRef}
                 type="file"
+                // V7.76 (11 oct.) — `multiple` : jusqu'à MAX_SHARE_FILES_COUNT fichiers par
+                // partage désormais (demande explicite de l'utilisatrice), plutôt qu'un seul.
+                multiple
                 // V7.55 (1er oct.) — bug réel trouvé en recette (capture d'écran à l'appui) :
                 // `image/*` combiné aux extensions de documents dans ce même `accept` faisait
                 // qu'Android proposait UNIQUEMENT "Appareil photo"/"Photos et vidéos" au tap sur
@@ -332,16 +394,43 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // d'accepter les images — seuls les documents courants restent listés.
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
                 onClick={() => { armCloseSuppression(); }}
-                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'file'); }}
+                onChange={(e) => {
+                  armCloseSuppression();
+                  pickFiles(e.target.files, 'file');
+                  // Vide le champ après lecture — sans cela, re-choisir EXACTEMENT le même
+                  // fichier après l'avoir retiré ne redéclencherait pas `onChange` (le
+                  // navigateur ne considère la valeur du champ comme changée que si elle
+                  // diffère de la précédente).
+                  e.target.value = '';
+                }}
                 aria-invalid={errors.file ? 'true' : undefined}
                 aria-describedby={errors.file ? 'ass-error-file' : undefined}
                 style={fieldStyle(errors.file)}
               />
-              {(documentFile || editingShare?.fileName) && (
-                <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: MUTED, margin: '6px 0 0' }}>
-                  <Paperclip size={13} />
-                  {documentFile ? `${documentFile.name} · ${formatBytes(documentFile.size)}` : `${editingShare.fileName}${editingShare.fileSize ? ' · ' + editingShare.fileSize : ''}`}
-                </p>
+              {/* V7.76 — liste des fichiers déjà enregistrés (non retirés) PUIS des fichiers
+                  nouvellement choisis, chacun avec son propre bouton de retrait — remplace
+                  l'ancien aperçu à un seul fichier. */}
+              {(existingVisible.length > 0 || newDocFiles.length > 0) && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 }}>
+                  {existingVisible.map((f) => (
+                    <div key={f.path} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: MUTED }}>
+                      <Paperclip size={13} style={{ flexShrink: 0 }} />
+                      <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{f.name}{f.size ? ` · ${f.size}` : ''}</span>
+                      <button type="button" onClick={() => setRemovedExistingFilePaths((prev) => new Set(prev).add(f.path))} aria-label={`Retirer ${f.name}`} className="tap-surface icon-button" style={{ background: 'none', border: 'none', flexShrink: 0 }}>
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  {newDocFiles.map((nf) => (
+                    <div key={nf.localId} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: MUTED }}>
+                      <Paperclip size={13} style={{ flexShrink: 0 }} />
+                      <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{nf.file.name} · {formatBytes(nf.file.size)}</span>
+                      <button type="button" onClick={() => removeNewFile('file', nf.localId)} aria-label={`Retirer ${nf.file.name}`} className="tap-surface icon-button" style={{ background: 'none', border: 'none', flexShrink: 0 }}>
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
               <ErrorText id="ass-error-file" message={errors.file} />
             </div>
@@ -364,11 +453,14 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
           )}
           {type === 'photo' && (
             <div>
-              <label htmlFor="ass-photo" style={labelStyle}>Photo</label>
+              <label htmlFor="ass-photo" style={labelStyle}>Photo(s)</label>
               <input
                 id="ass-photo"
                 ref={photoRef}
                 type="file"
+                // V7.76 (11 oct.) — `multiple` : jusqu'à MAX_SHARE_FILES_COUNT photos par
+                // partage désormais (demande explicite de l'utilisatrice), plutôt qu'une seule.
+                multiple
                 accept="image/*"
                 // V7.58 (1er oct.) — bug réel confirmé en recette : contrairement à ce que
                 // prétendait ce commentaire, `capture="environment"` envoyait bien DIRECTEMENT
@@ -379,20 +471,41 @@ export default function AddShareSheet({ onClose, onCreate, editingShare, events 
                 // sélecteur standard (appareil photo ET galerie), laissant le choix à
                 // l'utilisatrice plutôt que de le lui imposer.
                 onClick={() => { armCloseSuppression(); }}
-                onChange={(e) => { armCloseSuppression(); pickFile(e.target.files, 'photo'); }}
+                onChange={(e) => {
+                  armCloseSuppression();
+                  pickFiles(e.target.files, 'photo');
+                  // Même raison que pour le champ "Fichier" ci-dessus : permet de re-choisir la
+                  // même photo après l'avoir retirée.
+                  e.target.value = '';
+                }}
                 aria-invalid={errors.photo ? 'true' : undefined}
                 aria-describedby={errors.photo ? 'ass-error-photo' : undefined}
                 style={fieldStyle(errors.photo)}
               />
-              {/* Miniature d'aperçu avant envoi — URL objet locale (photoPreviewUrl) pour un
-                  nouveau fichier tout juste choisi, sinon l'URL signée déjà résolue par
-                  sharesApi.fetchShares (editingShare.photoDataUrl) en modification. */}
-              {(photoFile || editingShare?.photoDataUrl) && (
-                <img
-                  src={photoFile ? photoPreviewUrl : editingShare.photoDataUrl}
-                  alt="Aperçu de la photo choisie"
-                  style={{ marginTop: 8, width: '100%', maxHeight: 160, objectFit: 'cover', borderRadius: 10, border: `1px solid ${CARD_BORDER}` }}
-                />
+              {/* V7.76 — grille de miniatures (photos déjà enregistrées PUIS nouvellement
+                  choisies), chacune avec son propre bouton de retrait superposé — remplace
+                  l'ancienne miniature unique. URL objet locale pour un nouveau fichier tout
+                  juste choisi (nf.previewUrl), sinon l'URL signée déjà résolue par
+                  sharesApi.fetchShares (f.url) pour une photo déjà enregistrée. */}
+              {(existingVisible.length > 0 || newPhotoFiles.length > 0) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, marginTop: 8 }}>
+                  {existingVisible.map((f) => (
+                    <div key={f.path} style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${CARD_BORDER}`, aspectRatio: '1 / 1', background: '#F1F1EF' }}>
+                      {f.url && <img src={f.url} alt="Photo déjà enregistrée" style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />}
+                      <button type="button" onClick={() => setRemovedExistingFilePaths((prev) => new Set(prev).add(f.path))} aria-label="Retirer cette photo" className="tap-surface icon-button" style={{ position: 'absolute', top: 3, right: 3, background: 'rgba(23,32,51,0.65)', border: 'none', borderRadius: 999, width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                        <X size={12} color="#fff" />
+                      </button>
+                    </div>
+                  ))}
+                  {newPhotoFiles.map((nf) => (
+                    <div key={nf.localId} style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${CARD_BORDER}`, aspectRatio: '1 / 1' }}>
+                      <img src={nf.previewUrl} alt="Aperçu de la photo choisie" style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <button type="button" onClick={() => removeNewFile('photo', nf.localId)} aria-label="Retirer cette photo" className="tap-surface icon-button" style={{ position: 'absolute', top: 3, right: 3, background: 'rgba(23,32,51,0.65)', border: 'none', borderRadius: 999, width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                        <X size={12} color="#fff" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
               <ErrorText id="ass-error-photo" message={errors.photo} />
             </div>
