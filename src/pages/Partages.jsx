@@ -183,7 +183,20 @@ export default function Partages({
           // interaction n'est ajoutée (openableCardProps(null) renvoie {} — pas de piège de
           // focus/clic qui ne ferait rien), cohérent avec l'état "indisponible" déjà affiché
           // par ActionButton pour ces cas. Aucune nouvelle vue "fiche partage" inventée.
-          const cardHref = s.type === 'document' ? shareDoc(s)?.url : s.type === 'lien' ? s.linkUrl : s.type === 'photo' ? s.photoDataUrl : null;
+          // V7.76 (11 oct.) — un partage document/photo peut désormais avoir PLUSIEURS fichiers
+          // (`s.files`, voir sharesApi.js) : la carte entière reste cliquable (même ouverture
+          // qu'avant) seulement quand il n'y a QU'UN SEUL fichier, pour ne jamais faire deviner
+          // LEQUEL des fichiers un clic sur la carte ouvrirait — à partir de 2 fichiers, chacun
+          // a son propre lien/bouton explicite plus bas (voir docFiles.length > 1 /
+          // photoFiles.length > 1 ci-dessous), la carte elle-même n'ouvre plus rien.
+          const docFiles = s.type === 'document' ? (s.files || []) : [];
+          const photoFiles = s.type === 'photo' ? (s.files || []) : [];
+          const singleDoc = docFiles.length === 1 ? docFiles[0] : null;
+          const singlePhoto = photoFiles.length === 1 ? photoFiles[0] : null;
+          const cardHref = s.type === 'document' ? (singleDoc?.url ?? (docFiles.length === 0 ? shareDoc(s)?.url : null))
+            : s.type === 'lien' ? s.linkUrl
+            : s.type === 'photo' ? singlePhoto?.url
+            : null;
           return (
             <div
               key={s.id}
@@ -212,7 +225,7 @@ export default function Partages({
                 <div
                   style={{
                     width: 34, height: 34, borderRadius: 9, background: SHARE_TYPE_THEMES[s.type]?.tint || '#F1F1EF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    cursor: s.type === 'document' && shareDoc(s)?.url ? 'pointer' : 'default',
+                    cursor: cardHref ? 'pointer' : 'default',
                   }}
                 >
                   <Icon size={16} color={SHARE_TYPE_THEMES[s.type]?.color || BLUE} />
@@ -246,25 +259,45 @@ export default function Partages({
                       fileName/fileSize pour un partage créé via le formulaire "Ajouter un
                       partage" (aucun import de fichier réel n'existe encore, voir
                       AddShareSheet), qui n'a donc jamais de `documentId`. */}
-                  {s.type === 'document' && (
-                    // Item 9 (révisé) : même raison que l'icône ci-dessus — plus de
-                    // openableCardProps propre ici, la carte entière porte déjà la même action.
-                    <p
-                      // V7.67 (3 oct.) — corrigé : bug réel signalé par capture d'écran, un
-                      // nom de fichier long sans espaces (uniquement des "_") débordait du
-                      // cadre de la carte au lieu de passer à la ligne — `display:
-                      // inline-block` sans largeur contrainte laisse un élément s'étendre à
-                      // la largeur de son contenu, et le CSS par défaut ne coupe qu'aux
-                      // espaces/traits d'union, jamais aux "_". `overflowWrap: anywhere`
-                      // autorise la coupure n'importe où en dernier recours, `maxWidth: 100%`
-                      // force réellement la contrainte de largeur du parent.
-                      style={{ fontSize: 12.5, color: shareDoc(s)?.url ? BLUE : MUTED, margin: '6px 0 0', cursor: shareDoc(s)?.url ? 'pointer' : 'default', maxWidth: '100%', overflowWrap: 'anywhere' }}
-                    >
-                      {shareDoc(s)?.filename} · {shareDoc(s)?.size}
-                    </p>
+                  {s.type === 'document' && docFiles.length <= 1 && (() => {
+                    const doc = singleDoc || shareDoc(s);
+                    return (
+                      // Item 9 (révisé) : même raison que l'icône ci-dessus — plus de
+                      // openableCardProps propre ici, la carte entière porte déjà la même action.
+                      <p
+                        // V7.67 (3 oct.) — corrigé : bug réel signalé par capture d'écran, un
+                        // nom de fichier long sans espaces (uniquement des "_") débordait du
+                        // cadre de la carte au lieu de passer à la ligne — `display:
+                        // inline-block` sans largeur contrainte laisse un élément s'étendre à
+                        // la largeur de son contenu, et le CSS par défaut ne coupe qu'aux
+                        // espaces/traits d'union, jamais aux "_". `overflowWrap: anywhere`
+                        // autorise la coupure n'importe où en dernier recours, `maxWidth: 100%`
+                        // force réellement la contrainte de largeur du parent.
+                        style={{ fontSize: 12.5, color: doc?.url ? BLUE : MUTED, margin: '6px 0 0', cursor: doc?.url ? 'pointer' : 'default', maxWidth: '100%', overflowWrap: 'anywhere' }}
+                      >
+                        {doc ? `${doc.name || doc.filename} · ${doc.size}` : 'Aucun fichier.'}
+                      </p>
+                    );
+                  })()}
+                  {/* V7.76 (11 oct.) — à partir de 2 fichiers, une ligne par fichier avec son
+                      propre bouton Ouvrir/Télécharger (voir plus bas, la rangée d'actions globale
+                      ne couvre plus que le cas à 0/1 fichier) — remplace le simple "nom · taille"
+                      ci-dessus, qui ne pouvait montrer qu'UN fichier. */}
+                  {s.type === 'document' && docFiles.length > 1 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                      {docFiles.map((f) => (
+                        <div key={f.path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12.5, color: MUTED, maxWidth: '100%', overflowWrap: 'anywhere' }}>{f.name} · {f.size}</span>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <ActionButton icon={ExternalLink} href={f.url} title={f.url ? 'Ouvrir dans un nouvel onglet' : 'Indisponible pour le moment'}>Ouvrir</ActionButton>
+                            <ActionButton icon={Download} href={f.url} download={f.name} title={f.url ? 'Télécharger' : 'Indisponible pour le moment'}>Télécharger</ActionButton>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {s.type === 'photo' && (
-                    <p style={{ fontSize: 12.5, color: MUTED, margin: '6px 0 0' }}>{s.photoCount} photo{s.photoCount > 1 ? 's' : ''}</p>
+                    <p style={{ fontSize: 12.5, color: MUTED, margin: '6px 0 0' }}>{photoFiles.length} photo{photoFiles.length > 1 ? 's' : ''}</p>
                   )}
                   {/* V7.72 (3 oct.) — miniature réelle de la photo partagée, ajoutée suite à une
                       remarque utilisatrice : sans elle, un partage de type "photo" ne se
@@ -272,16 +305,35 @@ export default function Partages({
                       a quelque chose à voir. Même principe que la miniature d'image déjà affichée
                       dans Messages.jsx (V7.61, isImageAttachment) : <img> direct, sans action ni
                       gestionnaire propres — la carte entière porte déjà
-                      openableCardProps(cardHref) avec cardHref = s.photoDataUrl pour ce type (voir
-                      plus haut), donc cliquer la miniature ouvre déjà la photo via ce mécanisme
-                      existant ; lui ajouter son propre onClick aurait déclenché l'ouverture deux
-                      fois (même piège déjà évité pour l'icône de carte, "Item 9" plus haut).
-                      `s.photoDataUrl` peut valoir `undefined` (URL signée en échec, voir
-                      sharesApi.js) : la miniature ne s'affiche alors simplement pas, jamais une
-                      image cassée. */}
-                  {s.type === 'photo' && s.photoDataUrl && (
+                      openableCardProps(cardHref) avec cardHref = singlePhoto?.url pour ce cas
+                      (voir plus haut), donc cliquer la miniature ouvre déjà la photo via ce
+                      mécanisme existant ; lui ajouter son propre onClick aurait déclenché
+                      l'ouverture deux fois (même piège déjà évité pour l'icône de carte, "Item 9"
+                      plus haut). `singlePhoto?.url` peut valoir `undefined`/`null` (URL signée en
+                      échec, voir sharesApi.js) : la miniature ne s'affiche alors simplement pas,
+                      jamais une image cassée. */}
+                  {s.type === 'photo' && photoFiles.length === 1 && singlePhoto?.url && (
                     <div style={{ borderRadius: 12, overflow: 'hidden', marginTop: 8, maxWidth: 220 }}>
-                      <img src={s.photoDataUrl} alt={s.title} style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover' }} />
+                      <img src={singlePhoto.url} alt={s.title} style={{ display: 'block', width: '100%', maxHeight: 160, objectFit: 'cover' }} />
+                    </div>
+                  )}
+                  {/* V7.76 (11 oct.) — à partir de 2 photos, une grille de miniatures, chacune un
+                      vrai lien `<a>` ouvrant CETTE photo précise dans un nouvel onglet (jamais la
+                      carte entière, dont cardHref reste `null` dès que plusieurs fichiers
+                      existent — voir plus haut) ; une photo dont l'URL signée a échoué affiche un
+                      simple bloc neutre plutôt qu'une image cassée, même principe que partout
+                      ailleurs dans ce fichier. */}
+                  {s.type === 'photo' && photoFiles.length > 1 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 6, marginTop: 8, maxWidth: 260 }}>
+                      {photoFiles.map((f) => (
+                        f.url ? (
+                          <a key={f.path} href={f.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ display: 'block', borderRadius: 10, overflow: 'hidden', aspectRatio: '1 / 1' }}>
+                            <img src={f.url} alt={s.title} style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </a>
+                        ) : (
+                          <div key={f.path} style={{ borderRadius: 10, background: '#F1F1EF', aspectRatio: '1 / 1' }} />
+                        )
+                      ))}
                     </div>
                   )}
                   {s.type === 'lien' && (
@@ -320,24 +372,29 @@ export default function Partages({
                       photos existe dans les données), donc le bouton reste désactivé avec un
                       motif spécifique plutôt que le message générique "stockage non activé",
                       qui serait désormais faux pour les deux autres cas de cet écran. */}
+                  {/* V7.76 (11 oct.) — cette rangée globale ne couvre plus que le cas à 0/1
+                      fichier ; à partir de 2 fichiers, chaque fichier a déjà son propre
+                      Ouvrir/Télécharger juste au-dessus (voir docFiles.length > 1 /
+                      photoFiles.length > 1), répéter les mêmes boutons ici serait redondant. */}
                   <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    {s.type === 'document' && (() => {
-                      const doc = shareDoc(s);
+                    {s.type === 'document' && docFiles.length <= 1 && (() => {
+                      const doc = singleDoc || shareDoc(s);
                       const openTitle = doc?.url ? 'Ouvrir dans un nouvel onglet' : 'Ajouté sans import de fichier réel — rien à ouvrir';
                       return (
                         <>
                           <ActionButton icon={ExternalLink} href={doc?.url} title={openTitle}>Ouvrir</ActionButton>
-                          <ActionButton icon={Download} href={doc?.url} download={doc?.filename} title={doc?.url ? 'Télécharger' : openTitle}>Télécharger</ActionButton>
+                          <ActionButton icon={Download} href={doc?.url} download={doc?.name || doc?.filename} title={doc?.url ? 'Télécharger' : openTitle}>Télécharger</ActionButton>
                         </>
                       );
                     })()}
-                    {s.type === 'photo' && (
-                      // Backlog point 4 : `photoDataUrl` est désormais une vraie URL signée
+                    {s.type === 'photo' && photoFiles.length <= 1 && (
+                      // Backlog point 4 : `singlePhoto.url` est désormais une vraie URL signée
                       // Supabase Storage (sharesApi.fetchShares), jamais une `data:` URL locale.
-                      // `null` reste possible (URL signée en échec pour ce fichier précis — voir
-                      // le commentaire dans sharesApi.js) : le bouton reste alors désactivé avec
-                      // un motif honnête plutôt que de prétendre une ressource ouvrable.
-                      <ActionButton icon={ExternalLink} href={s.photoDataUrl} title={s.photoDataUrl ? 'Ouvrir la photo' : 'Photo indisponible pour le moment — réessaie plus tard'}>Ouvrir</ActionButton>
+                      // `null`/`undefined` reste possible (URL signée en échec, ou aucune photo
+                      // du tout — voir le commentaire dans sharesApi.js) : le bouton reste alors
+                      // désactivé avec un motif honnête plutôt que de prétendre une ressource
+                      // ouvrable.
+                      <ActionButton icon={ExternalLink} href={singlePhoto?.url} title={singlePhoto?.url ? 'Ouvrir la photo' : 'Photo indisponible pour le moment — réessaie plus tard'}>Ouvrir</ActionButton>
                     )}
                     {s.type === 'lien' && (
                       <ActionButton icon={ExternalLink} href={s.linkUrl} title="Ouvrir dans un nouvel onglet">Ouvrir</ActionButton>
