@@ -1488,21 +1488,26 @@ export default function App({ activeCommunity, memberships }) {
   // de retour qu'avant cette bascule ({ ok, error? }) pour qu'AddShareSheet.jsx n'ait rien à
   // changer de son propre côté : un échec (réseau, RLS, upload Storage) garde le formulaire
   // ouvert, erreur affichée inline, jamais une fermeture silencieuse qui ferait croire le
-  // partage enregistré. `file` = objet File réel transmis tel quel par AddShareSheet.jsx
-  // (`undefined`/`null` pour un partage 'lien'/'info', ou en modification sans remplacement).
-  async function handleCreateShare(payload, file) {
+  // partage enregistré. `filesChange` = `{ newFiles, removedFiles }` transmis tel quel par
+  // AddShareSheet.jsx (V7.76, 11 oct. — plusieurs fichiers par partage, voir sharesApi.js) :
+  // `newFiles` = objets File réels à ajouter, `removedFiles` = `{ id, path }` des fichiers
+  // existants à retirer (toujours `[]` pour un partage 'lien'/'info', ou à la création).
+  async function handleCreateShare(payload, filesChange) {
     if (!communityId || !currentUserId) {
       return { ok: false, error: 'Session invalide — reconnecte-toi.' };
     }
     try {
       if (payload.id) {
-        const previous = shares.find((s) => s.id === payload.id);
-        await sharesApi.updateShare(payload.id, communityId, currentUserId, payload, file, previous?.filePath || null);
+        await sharesApi.updateShare(payload.id, communityId, currentUserId, payload, filesChange?.newFiles, filesChange?.removedFiles);
       } else {
-        await sharesApi.createShare(communityId, currentUserId, payload, file);
+        await sharesApi.createShare(communityId, currentUserId, payload, filesChange?.newFiles);
       }
     } catch (err) {
-      return { ok: false, error: "Le partage n'a pas pu être enregistré — réessaie." };
+      // V7.76 DIAGNOSTIC TEMPORAIRE (11 oct.) — message technique affiché le temps de
+      // diagnostiquer l'échec de création d'un partage multi-fichiers ; à retirer dès la cause
+      // identifiée, jamais laissé en l'état pour un vrai utilisateur (même protocole que le
+      // diagnostic V7.71 déjà utilisé et retiré sur ce même bloc).
+      return { ok: false, error: `DIAGNOSTIC: ${err?.message || String(err)}${err?.code ? ' (code: ' + err.code + ')' : ''}${err?.details ? ' — ' + err.details : ''}${err?.hint ? ' — hint: ' + err.hint : ''}` };
     }
     try {
       // Même raisonnement que sendMessage (P1, ordonnanceur partagé 'shares') — voir le
@@ -1520,7 +1525,8 @@ export default function App({ activeCommunity, memberships }) {
   async function handleDeleteShare(id) {
     const target = shares.find((s) => s.id === id);
     try {
-      await sharesApi.deleteShare(id, target?.filePath || null);
+      // V7.76 (11 oct.) — tous les fichiers du partage (0 à plusieurs), pas un seul `filePath`.
+      await sharesApi.deleteShare(id, (target?.files || []).map((f) => f.path));
     } catch (err) {
       setSharesError("La suppression du partage a échoué — réessaie.");
       return;
