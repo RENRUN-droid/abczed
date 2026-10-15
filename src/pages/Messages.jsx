@@ -757,11 +757,23 @@ export default function Messages({
                             position: 'absolute', bottom: '120%', [isMine ? 'right' : 'left']: 0,
                             // V7.75 (15 oct.) — liste d'émojis passée de 5 à 12 (REACTION_EMOJIS,
                             // reactions.js) : une seule rangée aurait débordé de l'écran sur
-                            // téléphone. `flexWrap: 'wrap'` + `maxWidth` replient le popover sur
-                            // plusieurs lignes (4 par ligne) au lieu d'une rangée trop large ;
-                            // `borderRadius` réduit de 999 (pilule, adapté à une seule ligne) à 16
-                            // (cohérent avec un bloc sur plusieurs lignes désormais).
-                            display: 'flex', flexWrap: 'wrap', gap: 2, maxWidth: 176,
+                            // téléphone.
+                            //
+                            // CORRECTIF (15 oct., même jour) — bug réel confirmé en recette,
+                            // capture à l'appui : la première version (`display:'flex',
+                            // flexWrap:'wrap'` + `maxWidth: 176` seul, sans `width` explicite)
+                            // s'affichait en UNE SEULE COLONNE (12 lignes de 1 émoji) au lieu de 4
+                            // par ligne. Cause : ce popover est `position:'absolute'` avec une
+                            // largeur `auto` — sans `width` fixé, le navigateur calcule une largeur
+                            // "shrink-to-fit" à partir du contenu, et `maxWidth` ne fait que
+                            // PLAFONNER ce calcul, il ne force jamais le conteneur à occuper 176px :
+                            // le résultat observé (~40px, la largeur d'un seul bouton) montre que ce
+                            // calcul s'est résolu vers la largeur minimale, pas vers le plafond.
+                            // Remplacé par `display:'grid'` + `gridTemplateColumns:'repeat(4,
+                            // 40px)'` + une `width` EXPLICITE (166px = 4×40 + 3×2 de gap) : une
+                            // grille à colonnes fixes ne dépend d'aucun calcul de largeur ambigu,
+                            // 4 par ligne est garanti quel que soit le navigateur.
+                            display: 'grid', gridTemplateColumns: 'repeat(4, 40px)', gap: 2, width: 166,
                             background: '#fff', border: `1px solid ${CARD_BORDER}`,
                             borderRadius: 16, padding: '4px 6px', boxShadow: '0 4px 14px rgba(23,32,51,0.15)', zIndex: 5,
                           }}
