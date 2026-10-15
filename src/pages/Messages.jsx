@@ -755,8 +755,15 @@ export default function Messages({
                           aria-label="Choisir une réaction"
                           style={{
                             position: 'absolute', bottom: '120%', [isMine ? 'right' : 'left']: 0,
-                            display: 'flex', gap: 2, background: '#fff', border: `1px solid ${CARD_BORDER}`,
-                            borderRadius: 999, padding: '4px 6px', boxShadow: '0 4px 14px rgba(23,32,51,0.15)', zIndex: 5,
+                            // V7.75 (15 oct.) — liste d'émojis passée de 5 à 12 (REACTION_EMOJIS,
+                            // reactions.js) : une seule rangée aurait débordé de l'écran sur
+                            // téléphone. `flexWrap: 'wrap'` + `maxWidth` replient le popover sur
+                            // plusieurs lignes (4 par ligne) au lieu d'une rangée trop large ;
+                            // `borderRadius` réduit de 999 (pilule, adapté à une seule ligne) à 16
+                            // (cohérent avec un bloc sur plusieurs lignes désormais).
+                            display: 'flex', flexWrap: 'wrap', gap: 2, maxWidth: 176,
+                            background: '#fff', border: `1px solid ${CARD_BORDER}`,
+                            borderRadius: 16, padding: '4px 6px', boxShadow: '0 4px 14px rgba(23,32,51,0.15)', zIndex: 5,
                           }}
                         >
                           {REACTION_EMOJIS.map((emoji) => (
