@@ -15,9 +15,14 @@
 // (sélection courante d'une appli de messagerie familiale, pas un clavier émoji complet —
 // ce serait une autre pièce d'UI, avec recherche/catégories, hors périmètre de cette demande).
 // Messages.jsx (le popover "Choisir une réaction") passe en conséquence sur plusieurs lignes
-// (`flexWrap: 'wrap'`, largeur plafonnée) plutôt qu'une seule rangée de 12 pastilles qui aurait
-// débordé de l'écran sur téléphone — voir le commentaire correspondant dans ce fichier.
-export const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏', '🎉', '👏', '🔥', '😍', '😅', '🤔'];
+// (grille à 4 colonnes fixes, voir le commentaire correspondant dans ce fichier) plutôt qu'une
+// seule rangée de pastilles qui aurait débordé de l'écran sur téléphone.
+//
+// CORRECTIF (15 oct., même jour) — retour réel après premier test : 12 jugés encore un peu
+// courts. Ajout de 4 émojis (👌 ✅ 💪 💯), repris du propre usage de l'utilisatrice dans ses
+// messages ABCZed (elle tapait 👌/💪 au clavier, faute de les trouver dans le sélecteur de
+// réaction) — 16 au total, qui tombent pile sur 4 lignes de 4 dans la grille de Messages.jsx.
+export const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏', '🎉', '👏', '🔥', '😍', '😅', '🤔', '👌', '✅', '💪', '💯'];
 
 // Un message → un résumé par émoji, prêt à afficher : [{emoji, count, mine, people}].
 // `people` (noms) alimente le "qui a réagi" (affiché via title/aria-label sur chaque pastille,
