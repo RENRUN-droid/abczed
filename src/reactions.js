@@ -11,7 +11,13 @@
 // App.jsx/messagesApi.toggleMessageReaction) — conservée et toujours testée pour son usage
 // antérieur, sans lien avec le nouveau chemin réel.
 
-export const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢'];
+// V7.75 (15 oct.) — demande explicite de l'utilisatrice : liste élargie de 5 à 12 émojis
+// (sélection courante d'une appli de messagerie familiale, pas un clavier émoji complet —
+// ce serait une autre pièce d'UI, avec recherche/catégories, hors périmètre de cette demande).
+// Messages.jsx (le popover "Choisir une réaction") passe en conséquence sur plusieurs lignes
+// (`flexWrap: 'wrap'`, largeur plafonnée) plutôt qu'une seule rangée de 12 pastilles qui aurait
+// débordé de l'écran sur téléphone — voir le commentaire correspondant dans ce fichier.
+export const REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏', '🎉', '👏', '🔥', '😍', '😅', '🤔'];
 
 // Un message → un résumé par émoji, prêt à afficher : [{emoji, count, mine, people}].
 // `people` (noms) alimente le "qui a réagi" (affiché via title/aria-label sur chaque pastille,
