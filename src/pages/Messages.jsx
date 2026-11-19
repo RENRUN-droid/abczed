@@ -26,6 +26,7 @@ import { dateSeparatorLabel } from '../dateLabels.js';
 import { MESSAGES_FROM_SUPABASE } from '../dataSourceFlags';
 import CompactHeader from '../components/CompactHeader';
 import PageTitle from '../components/PageTitle';
+import LinkifiedText from '../components/LinkifiedText';
 
 // V7.61 (1er oct.) — mêmes helpers que AddShareSheet.jsx (formatBytes) et même heuristique que
 // nécessaire ici spécifiquement : un message n'a qu'UN SEUL trombone (contrairement à Partages,
@@ -652,7 +653,7 @@ export default function Messages({
                         <div style={{ fontSize: 11.5, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.replyTo.text}</div>
                       </button>
                     )}
-                    {m.text && <p style={{ fontSize: 16, margin: 0, lineHeight: 1.45, color: INK }}>{m.text}</p>}
+                    {m.text && <p style={{ fontSize: 16, margin: 0, lineHeight: 1.45, color: INK }}><LinkifiedText text={m.text} /></p>}
                     {/* V7.61 (1er oct.) — pièce jointe RÉELLE (trombone), remplace l'ancien bloc
                         de démonstration (`m.fileId`/src/documents.js) : mort depuis que
                         MESSAGES_FROM_SUPABASE est figé à true (fetchMessages, messagesApi.js, ne

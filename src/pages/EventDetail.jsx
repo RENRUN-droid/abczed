@@ -9,6 +9,7 @@ import { resizeNames, buildAttendeeNames, attendeeNamesLine } from '../attendeeN
 import { peopleCountOf, familiesCountOf, eventModeOf } from '../agendaSearch';
 import { useModalA11y } from '../useModalA11y';
 import CompactHeader from '../components/CompactHeader';
+import LinkifiedText from '../components/LinkifiedText';
 
 // Gère les deux formes de participants qui peuvent coexister tant que Messages/Partages
 // n'ont pas migré : chaîne simple (données fictives de data.js) ou objet {userId, label,
@@ -414,7 +415,7 @@ export default function EventDetail({
         {(event.description || event.attachments?.length > 0) && (
         <div>
           {event.description && (
-            <p style={{ fontSize: 16, lineHeight: 1.45, color: INK, marginBottom: 16 }}>{event.description}</p>
+            <p style={{ fontSize: 16, lineHeight: 1.45, color: INK, marginBottom: 16, whiteSpace: 'pre-line' }}><LinkifiedText text={event.description} /></p>
           )}
 
           {event.attachments?.length > 0 && (

@@ -19,6 +19,7 @@ import PageTitle from '../components/PageTitle';
 import Button from '../components/Button';
 import EditBilletSheet from '../components/EditBilletSheet';
 import Avatar from '../components/Avatar';
+import LinkifiedText from '../components/LinkifiedText';
 
 // V7.29 (25 sept.) — retiré : ce tableau ne contenait qu'une entrée de démonstration codée en
 // dur ("Rentrée décalée à 8h45 vendredi"), jamais reliée à une vraie donnée, et sans aucun
@@ -358,7 +359,7 @@ export default function Accueil({
               </div>
               {billet ? (
                 <p style={{ fontSize: 16, lineHeight: 1.45, margin: '8px 0 0', color: INK, whiteSpace: 'pre-line' }}>
-                  {billet.content}
+                  <LinkifiedText text={billet.content} />
                 </p>
               ) : (
                 <p style={{ fontSize: 13.5, lineHeight: 1.45, margin: '8px 0 0', color: MUTED }}>

@@ -9,6 +9,7 @@ import { documentById } from '../documents';
 import { openableCardProps } from '../attachmentCardA11y';
 import ActionButton from '../components/ActionButton';
 import PageTitle from '../components/PageTitle';
+import LinkifiedText from '../components/LinkifiedText';
 
 const ICONS = { document: FileText, photo: Image, lien: Link2, info: Info };
 
@@ -250,7 +251,7 @@ export default function Partages({
                       caractères. `pre-line` les respecte (paragraphe par paragraphe) tout en
                       absorbant les espaces superflus d'un copier-coller, sans figer les espaces
                       multiples comme `pre-wrap` l'aurait fait. */}
-                  {s.description && <p style={{ fontSize: 14, color: INK, opacity: 0.85, margin: '4px 0 0', lineHeight: 1.4, whiteSpace: 'pre-line' }}>{s.description}</p>}
+                  {s.description && <p style={{ fontSize: 14, color: INK, opacity: 0.85, margin: '4px 0 0', lineHeight: 1.4, whiteSpace: 'pre-line' }}><LinkifiedText text={s.description} /></p>}
 
                   {/* Delta pts 29/30/39/42 (arbitrage D1) : nom/taille résolus depuis le
                       catalogue src/documents.js quand ce partage y référence un fichier réel
